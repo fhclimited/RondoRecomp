@@ -14,6 +14,18 @@ endif()
 add_library(hucpu STATIC runtime/cpu/huc6280.c)
 target_include_directories(hucpu PUBLIC runtime)
 
+add_library(pce STATIC
+  runtime/pce/pce.c
+  runtime/pce/video.c
+  runtime/pce/disc.c
+  runtime/pce/bios_hle.c
+  runtime/util/png.c)
+target_include_directories(pce PUBLIC runtime)
+target_link_libraries(pce PUBLIC hucpu)
+
+add_executable(rondo_headless tools/headless/main.c)
+target_link_libraries(rondo_headless PRIVATE pce)
+
 # CPU conformance tests (SingleStepTests/huc6280, MIT). Download the v1 *.json.bin
 # files into work/sst/v1 (git-ignored) or point SST_DIR elsewhere.
 add_executable(sst_huc6280 tests/sst_huc6280.c)

@@ -87,6 +87,17 @@ Bank-aware recursive descent from `$4000` plus both IRQ vectors, after groups 0/
 - Runtime consequence: the BIOS is needed only as a library of 24 functions. Interrupts can be
   sent straight to the game's handlers without emulating BIOS interrupt code.
 
+## Frame structure (observed at runtime)
+
+- The vblank handler (`$4177`) saves registers and MPR4-6 and reads VDC status. If the raster
+  flag is set, it runs the raster dispatcher (table `$44E9`); if the vblank flag is not set, it
+  exits. Otherwise it counts the frame (`$47`), re-enables interrupts and runs the frame logic,
+  guarded against re-entry by a busy flag (`$33`).
+- The second dispatcher (`69:44E6`) selects per-scene raster effects. Entry 0 means "none".
+- System Card calls seen from boot to the save menu: CD_READ, CD_PLAY, CD_FADE, CD_STAT,
+  AD_TRANS, AD_PLAY, AD_STOP, AD_STAT (every frame), EX_JOYSNS (every frame), EX_GETFNT,
+  BM_READ/WRITE/DELETE/FREE (save setup), EX_SCRSIZ.
+
 ## Open questions
 
 - [ ] Role of track 22 / second `CD_BASE` (error-retry mirror?) and which track carries the translation

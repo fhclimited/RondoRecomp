@@ -47,3 +47,45 @@ unrecorded addresses as unknown, because the generator's background memory is ra
 Not covered by the suite and still to do: interrupt timing (including the one-instruction
 delay after CLI/SEI/PLP), VDC/VCE access wait states, and the timer and interrupt controller,
 which belong to the system layer.
+
+## System layer (`runtime/pce/`)
+
+| File | Contents |
+|---|---|
+| `pce.c` | memory map (Super RAM `$68-$7F`, CD RAM `$80-$87`, BRAM `$F7`, WRAM `$F8-$FB`, I/O `$FF`), interrupt controller, timer, joypad, scanline-timed frame loop (263 lines × 1365 master clocks) |
+| `video.c` | VCE palette; VDC registers, VRAM, VRAM/SATB DMA, raster/vblank interrupts, background + sprite scanline renderer |
+| `disc.c` | CUE + ISO/BIN/WAV reader addressed by absolute LBA |
+| `bios_hle.c` | System Card functions in C, run when the CPU reaches a jump-table address |
+
+Bank `$00` holds a small ROM of our own: the interrupt stubs follow the System Card's dispatch
+rule (bit set in `irq_m` → jump through the work-RAM vector), plus the two bank-number bytes
+the boot code reads. No System Card image is needed.
+
+System Card functions implemented: CD_BASE, CD_READ (all modes), CD_STAT, AD_TRANS, EX_GETVER,
+EX_SETVEC, EX_JOYSNS, EX_SCRMOD, EX_SCRSIZ, EX_DOTMOD, EX_MEMOPEN, MA_MUL8U/8S/16U, MA_DIV16U/16S.
+Stubbed for now (return success): CD_PLAY, CD_SEARCH, CD_PAUSE, CD_FADE, AD_PLAY/CPLAY/STOP/STAT,
+BM_* (save data), EX_SATCLR. Not yet implemented: EX_GETFNT (font glyphs).
+
+### Headless runner
+
+```sh
+build/rondo_headless <game.cue> --frames 3000 --shot-every 150 --out work/shots \
+    [--log-bios | --log-bios-all] [--press FRAME:run,i:LEN] [--profile] \
+    [--watch BANK:ADDR] [--trace FRAME:COUNT] [--bios-reset syscard3.pce]
+```
+
+The interpreter runs at about 2,600 frames per second (~43× real time).
+
+Progress so far: boot, publisher logo, the full intro, attract mode, title, and the save-file
+menu all render and run.
+
+### Hardware behaviour this depends on
+
+- **VDC status flags are only latched when their interrupt is enabled.** Rondo's vblank
+  handler checks the raster flag first and takes a raster-only path when it is set. If a raster
+  match is latched while raster interrupts are disabled, it arrives together with vblank and the
+  frame logic never runs again (the game froze on the logo before this was fixed).
+- Rondo never uses the timer: its timer handler is a bare `RTI`. The System Card leaves the
+  timer stopped after reset (checked by running the original reset code with `--bios-reset`).
+- Input arrives through the System Card's `EX_JOYSNS` variables (`$2228` held, `$222D` newly
+  pressed, `$2232` previous), which the game refreshes every frame.
