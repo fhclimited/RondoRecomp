@@ -26,6 +26,8 @@ static const char *const OFF_ON[] = {"Off", "On"};
 static const char *const ASPECTS[] = {"4:3 (TV)", "Square pixels", "Stretch to fill"};
 static const char *const FILTERS[] = {"Sharp", "Nearest", "Smooth"};
 static const char *const SIDES[] = {"Blurred picture", "Black"};
+static const char *const WIDES[] = {"Off (4:3)", "More of the level"};
+static const char *const SCALINGS[] = {"Fit screen", "Whole multiples"};
 static const char *const SKIPS[] = {"Press START", "Automatically", "Never"};
 static const char *const LANGS[] = {"English", "Japanese"};
 static const char *const SLOTS[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
@@ -50,10 +52,11 @@ static const Item MAIN_ITEMS[] = {
 };
 static const Item VIDEO_ITEMS[] = {
     TOGGLE("Fullscreen", fullscreen, MENU_VIDEO_CHANGED),
+    CHOICE("Widescreen", widescreen, WIDES, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Aspect ratio", aspect, ASPECTS, 0, MENU_SETTINGS_CHANGED),
-    TOGGLE("Integer scaling", integer_scale, MENU_SETTINGS_CHANGED),
+    CHOICE("Size", scaling, SCALINGS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Filter", filter, FILTERS, 0, MENU_SETTINGS_CHANGED),
-    CHOICE("Wide-screen sides", sides, SIDES, 0, MENU_SETTINGS_CHANGED),
+    CHOICE("Beside the picture", sides, SIDES, 0, MENU_SETTINGS_CHANGED),
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 static const Item GAMEPLAY_ITEMS[] = {
@@ -66,6 +69,12 @@ static const Item CHEAT_ITEMS[] = {
     TOGGLE("Infinite health", cheat_health, MENU_SETTINGS_CHANGED),
     TOGGLE("Infinite hearts", cheat_hearts, MENU_SETTINGS_CHANGED),
     TOGGLE("Infinite lives", cheat_lives, MENU_SETTINGS_CHANGED),
+    TOGGLE("Maria unlocked", maria_unlocked, MENU_SETTINGS_CHANGED),
+    TOGGLE("Play as Maria", play_maria, MENU_SETTINGS_CHANGED),
+    {IT_TEXT, "", 0, 0, NULL, 0, 0, 0},
+    {IT_TEXT, "Play as Maria starts at the next stage", 0, 0, NULL, 0, 0, 0},
+    {IT_TEXT, "(the Prologue too). Maria unlocked lets", 0, 0, NULL, 0, 0, 0},
+    {IT_TEXT, "the game offer her, as after Stage 2.", 0, 0, NULL, 0, 0, 0},
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 static const Item CONTROL_ITEMS[] = {
@@ -76,6 +85,7 @@ static const Item CONTROL_ITEMS[] = {
     {IT_TEXT, "Sub-weapon    B            C", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Item Crash    Y            V", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Backflip      RB           A", 0, 0, NULL, 0, 0, 0},
+    {IT_TEXT, "Run (hold)    LB           S", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Pause         START        Enter", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Menu          BACK         F1 / Esc", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Rewind (hold) LT           R", 0, 0, NULL, 0, 0, 0},

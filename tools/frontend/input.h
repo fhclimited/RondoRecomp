@@ -7,6 +7,7 @@
  *   Sub-weapon   B                    C        (Up + Attack)
  *   Item Crash   Y                    V        (SELECT)
  *   Backflip     RB                   A        (Jump twice; Maria: double jump)
+ *   Run          hold LB              hold S   (with a direction; see game.h)
  *   Pause (RUN)  Start                Enter
  *   Menu         Back / View          F1 or Esc
  *   Rewind       hold LT              hold R
@@ -45,6 +46,8 @@ uint8_t input_game(Input *in);
 /* Forget held macros (menu opened, state loaded). */
 void input_cancel_macros(Input *in);
 bool input_rewind_held(const Input *in);
+/* Run button held (LB / S): the frontend speeds the walk up (game_apply_run). */
+bool input_run_held(const Input *in);
 /* START / Enter pressed (event) — skips a cinematic. */
 bool input_is_start(const SDL_Event *ev);
 /* Menu navigation from an event, and from the left stick (polled each frame). */

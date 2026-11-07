@@ -187,6 +187,9 @@ void vdc_line_start(Vdc *d, int line)
         if (d->display_end > PCE_LINES_PER_FRAME) d->display_end = PCE_LINES_PER_FRAME;
         d->first_line = true;
         int w = ((d->reg[R_HDR] & 0x7F) + 1) * 8;
+        int e = d->wide < 0 ? 0 : d->wide > VDC_WIDE_MAX ? VDC_WIDE_MAX : d->wide;
+        d->fb_wide = w == 256 ? e : 0;
+        w += 2 * d->fb_wide;
         d->fb_w = w > PCE_FB_MAX_W ? PCE_FB_MAX_W : w;
         int h = d->display_end - d->display_start;
         d->fb_h = h > PCE_FB_MAX_H ? PCE_FB_MAX_H : (h < 0 ? 0 : h);
@@ -212,7 +215,8 @@ void vdc_line_start(Vdc *d, int line)
 
 /* ---- rendering ------------------------------------------------------------- */
 
-static void render_bg(Vdc *d, int y, int w, uint16_t *out)
+/* x0: screen x of out[0] (negative in widescreen) */
+static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
 {
     static const int map_w[4] = {32, 64, 128, 128};
     uint16_t mwr = d->reg[R_MWR];
@@ -220,7 +224,7 @@ static void render_bg(Vdc *d, int y, int w, uint16_t *out)
     int mh = (mwr & 0x40) ? 64 : 32;
     int py = y & (mh * 8 - 1);
     int row = py & 7;
-    int sx = d->reg[R_BXR] & 0x3FF;
+    int sx = (d->reg[R_BXR] & 0x3FF) + x0;
     const uint16_t *map = &d->vram[(py >> 3) * mw];
     for (int x = 0; x < w; x++) {
         int px = (sx + x) & (mw * 8 - 1);
@@ -234,8 +238,9 @@ static void render_bg(Vdc *d, int y, int w, uint16_t *out)
     }
 }
 
-/* out: 0 = none, else 0x100 | palette<<4 | color, bit 15 = in front of BG */
-static void render_sprites(Vdc *d, int y, int w, uint16_t *out)
+/* out: 0 = none, else 0x100 | palette<<4 | color, bit 15 = in front of BG.
+ * x0: screen x of out[0] (negative in widescreen). */
+static void render_sprites(Vdc *d, int y, int x0, int w, uint16_t *out)
 {
     int count = 0;
     bool spr0_drawn[PCE_FB_MAX_W];
@@ -249,10 +254,16 @@ static void render_sprites(Vdc *d, int y, int w, uint16_t *out)
         if (y < sy || y >= sy + h) continue;
         if (++count > 16) {
             raise(d, VDC_ST_OR, (d->reg[R_CR] & 0x02) != 0);
-            break;
+            /* the hardware shows 16 sprites per line; widescreen shows more of the level
+             * and drops the limit rather than lose sprites at the new edges */
+            if (!x0) break;
         }
         int sw = (attr & 0x0100) ? 32 : 16;
         int sx = (s[1] & 0x3FF) - 32;
+        /* 10-bit X: in widescreen, values past the right of any real display are
+         * sprites to the left of the picture */
+        if (x0 && sx >= 1024 - 32 + x0 - 32) sx -= 1024;
+        sx -= x0;
         int pattern = (s[2] >> 1) & 0x3FF;
         if (sw == 32) pattern &= ~1;
         if (h == 32) pattern &= ~2;
@@ -300,8 +311,9 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
     memset(bg, 0, sizeof bg);
     memset(sp, 0, sizeof sp);
     uint16_t cr = d->reg[R_CR];
-    if (cr & 0x80) render_bg(d, y, w, bg);
-    if (cr & 0x40) render_sprites(d, row, w, sp);
+    int x0 = -d->fb_wide;
+    if (cr & 0x80) render_bg(d, y, x0, w, bg);
+    if (cr & 0x40) render_sprites(d, row, x0, w, sp);
 
     uint32_t *dst = &d->fb[row * PCE_FB_MAX_W];
     for (int x = 0; x < w; x++) {
@@ -309,5 +321,14 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
         if (s && ((s & 0x8000) || !bg[x])) dst[x] = vce->argb[s & 0x1FF];
         else if (bg[x]) dst[x] = vce->argb[bg[x]];
         else dst[x] = vce->argb[0];
+    }
+    if (d->fb_wide) {
+        /* beyond the room's walls: black behind the sprites */
+        int x0 = d->wide_x0 < 0 ? 0 : d->wide_x0, x1 = d->wide_x1 > w ? w : d->wide_x1;
+        for (int x = 0; x < w; x++) {
+            if (x >= x0 && x < x1) continue;
+            uint16_t s = sp[x];
+            dst[x] = s ? vce->argb[s & 0x1FF] : 0xFF000000u;
+        }
     }
 }

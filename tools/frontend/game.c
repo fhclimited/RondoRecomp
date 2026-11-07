@@ -47,8 +47,55 @@ void game_apply_cheats(Pce *p, const GameCheats *c, GameWatch *w)
         if (s == RONDO_PLAYING && !w->hearts_suspended && ram[RONDO_HEARTS] != 0x99) ram[RONDO_HEARTS] = 0x99;
     }
 
+    /* Maria: unlocked in the save record while playing (so the game's own player change
+     * offers her, and a save keeps it); played from every stage load, the Prologue too,
+     * by setting the character whenever a stage may be loading */
+    bool loading = s != RONDO_PLAYING || ram[RONDO_SUB] == 0x00;
+    if (c->maria_unlocked && s == RONDO_PLAYING) ram[RONDO_UNLOCKS] |= 0x01;
+    if (c->play_maria) {
+        if (loading) ram[RONDO_CHARACTER] = 1;
+        w->maria_forced = true;
+    } else if (w->maria_forced && loading) {
+        ram[RONDO_CHARACTER] = 0;
+        w->maria_forced = false;
+    }
+
     w->last_state = s;
     w->last_health = ram[RONDO_HEALTH];
     w->last_lives = ram[RONDO_LIVES];
     w->last_hearts = ram[RONDO_HEARTS];
+}
+
+/* SotN: Richter walks at 1.25 and runs at 2.3 pixels a frame. */
+static int run_speed(int walk) { return walk * 46 / 25; }
+
+void game_apply_run(Pce *p, bool held, GameWatch *w)
+{
+    uint8_t *ram = p->wram;
+    if (game_state(p) != RONDO_PLAYING) { w->run_from = 0; return; }
+    int v = (int16_t)(ram[RONDO_PLAYER_VX_LO] | ram[RONDO_PLAYER_VX_HI] << 8);
+    int mag = v < 0 ? -v : v;
+    bool forward = v != 0 && (v < 0) == (ram[RONDO_PLAYER_FACING] != 0);
+    bool maria = ram[RONDO_CHARACTER] == 1;
+    int walk = maria ? 0x160 : 0x140, jump = maria ? 0x160 : 0x150;   /* 8.8 px a frame */
+    int to = -1;
+    if (held && forward && (mag == walk || mag == jump)) {
+        w->run_from = mag;
+        to = run_speed(mag);
+    } else if (!held && w->run_from && mag == run_speed(w->run_from)) {
+        to = w->run_from;                  /* let go: back to the game's own speed */
+        w->run_from = 0;
+    } else if (mag == 0) {
+        w->run_from = 0;
+    }
+    if (to >= 0) {
+        int nv = v < 0 ? -to : to;
+        ram[RONDO_PLAYER_VX_LO] = (uint8_t)nv;
+        ram[RONDO_PLAYER_VX_HI] = (uint8_t)(nv >> 8);
+        mag = to;
+    }
+    /* legs to match: the walk cycle's frame timer counts down 6..1; take an extra step
+     * off it on 5 frames out of 6 (never past 1, where the game moves to the next frame) */
+    if (w->run_from == walk && mag == run_speed(walk) && ram[RONDO_PLAYER_ANIM_TIMER] > 1 && p->frame % 6)
+        ram[RONDO_PLAYER_ANIM_TIMER]--;
 }

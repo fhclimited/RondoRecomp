@@ -6,14 +6,16 @@
 enum { ASPECT_4_3, ASPECT_SQUARE, ASPECT_STRETCH, ASPECT_COUNT };
 enum { FILTER_SHARP, FILTER_NEAREST, FILTER_SMOOTH, FILTER_COUNT };
 enum { SIDES_BLUR, SIDES_BLACK, SIDES_COUNT };
+enum { SCALE_FIT, SCALE_WHOLE, SCALE_COUNT };
 enum { SKIP_START, SKIP_AUTO, SKIP_OFF, SKIP_COUNT };
 enum { LANG_EN, LANG_JA, LANG_COUNT };
 
 typedef struct Settings {
     /* video */
     bool fullscreen;
+    bool widescreen;       /* show more of the level on wide screens */
     int aspect;            /* ASPECT_* */
-    bool integer_scale;
+    int scaling;           /* SCALE_*: fit the screen, or whole multiples only */
     int filter;            /* FILTER_* */
     int sides;             /* SIDES_*: what fills a wide screen beside the picture */
     /* gameplay */
@@ -23,6 +25,8 @@ typedef struct Settings {
     int slot;              /* save-state slot 1-9 */
     /* cheats */
     bool cheat_health, cheat_hearts, cheat_lives;
+    bool maria_unlocked;   /* the game offers Maria (its own player change) */
+    bool play_maria;       /* every stage, the Prologue too, played as Maria */
     /* language: which disc image to run */
     int language;          /* LANG_* */
     char disc_ja[1024];    /* the Japanese disc image (.cue), if the player added one */

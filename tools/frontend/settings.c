@@ -8,8 +8,9 @@
 void settings_default(Settings *s)
 {
     memset(s, 0, sizeof *s);
+    s->widescreen = true;
     s->aspect = ASPECT_4_3;
-    s->integer_scale = false;
+    s->scaling = SCALE_FIT;
     s->filter = FILTER_SHARP;
     s->sides = SIDES_BLUR;
     s->skip = SKIP_START;
@@ -39,7 +40,8 @@ void settings_load(Settings *s, const char *path)
         int n = atoi(val);
         if (!strcmp(key, "fullscreen")) s->fullscreen = n != 0;
         else if (!strcmp(key, "aspect")) s->aspect = clampi(n, 0, ASPECT_COUNT - 1);
-        else if (!strcmp(key, "integer_scale")) s->integer_scale = n != 0;
+        else if (!strcmp(key, "widescreen")) s->widescreen = n != 0;
+        else if (!strcmp(key, "scaling")) s->scaling = clampi(n, 0, SCALE_COUNT - 1);
         else if (!strcmp(key, "filter")) s->filter = clampi(n, 0, FILTER_COUNT - 1);
         else if (!strcmp(key, "sides")) s->sides = clampi(n, 0, SIDES_COUNT - 1);
         else if (!strcmp(key, "skip_cinematics")) s->skip = clampi(n, 0, SKIP_COUNT - 1);
@@ -49,6 +51,8 @@ void settings_load(Settings *s, const char *path)
         else if (!strcmp(key, "cheat_health")) s->cheat_health = n != 0;
         else if (!strcmp(key, "cheat_hearts")) s->cheat_hearts = n != 0;
         else if (!strcmp(key, "cheat_lives")) s->cheat_lives = n != 0;
+        else if (!strcmp(key, "maria_unlocked")) s->maria_unlocked = n != 0;
+        else if (!strcmp(key, "play_maria")) s->play_maria = n != 0;
         else if (!strcmp(key, "language")) s->language = clampi(n, 0, LANG_COUNT - 1);
         else if (!strcmp(key, "disc_ja")) snprintf(s->disc_ja, sizeof s->disc_ja, "%s", val);
     }
@@ -61,13 +65,15 @@ bool settings_save(const Settings *s, const char *path)
     if (!f) return false;
     fprintf(f,
             "# Rondo Recomp options (also changed from the in-game menu: F1 / Back)\n"
-            "fullscreen = %d\naspect = %d\ninteger_scale = %d\nfilter = %d\nsides = %d\n"
+            "fullscreen = %d\nwidescreen = %d\naspect = %d\nscaling = %d\nfilter = %d\nsides = %d\n"
             "skip_cinematics = %d\nrewind = %d\nvolume = %d\nslot = %d\n"
             "cheat_health = %d\ncheat_hearts = %d\ncheat_lives = %d\n"
+            "maria_unlocked = %d\nplay_maria = %d\n"
             "language = %d\ndisc_ja = %s\n",
-            s->fullscreen, s->aspect, s->integer_scale, s->filter, s->sides,
+            s->fullscreen, s->widescreen, s->aspect, s->scaling, s->filter, s->sides,
             s->skip, s->rewind, s->volume, s->slot,
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
+            s->maria_unlocked, s->play_maria,
             s->language, s->disc_ja);
     return fclose(f) == 0;
 }

@@ -114,6 +114,14 @@ uint8_t input_game(Input *in)
     return m;
 }
 
+bool input_run_held(const Input *in)
+{
+    if (SDL_GetKeyboardState(NULL)[SDL_SCANCODE_S]) return true;
+    for (int i = 0; i < 8; i++)
+        if (in->pads[i] && SDL_GetGamepadButton(in->pads[i], SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) return true;
+    return false;
+}
+
 bool input_rewind_held(const Input *in)
 {
     if (SDL_GetKeyboardState(NULL)[SDL_SCANCODE_R]) return true;

@@ -11,6 +11,7 @@
 #include "pce/pce.h"
 #include "pce/state.h"
 #include "../frontend/game.h"
+#include "../frontend/wide.h"
 #include "recomp/recomp.h"
 #include "../recomp/capture_script.h"
 #include "util/png.h"
@@ -27,9 +28,75 @@ static struct { uint8_t bank; uint16_t addr; int last_x; } watch[8];
 static long trace_frame = -1, trace_left;
 static FILE *trace_f;
 
+/* --write-watch ADDR,...: report which instruction changed these WRAM bytes */
+static int n_ww;
+static unsigned ww_addr[16];
+static uint8_t ww_last[16];
+static long ww_from = 0, ww_to = 0x7FFFFFFF;
+static uint16_t ww_prev_pc;
+static uint8_t ww_prev_bank;
+static int ww_prev_a, ww_prev_x, ww_prev_y;
+static long ww_count, ww_max = 4000;
+
+static void write_watch(Pce *p)
+{
+    long f = (long)p->frame;
+    for (int i = 0; i < n_ww; i++) {
+        uint8_t v = p->wram[ww_addr[i]];
+        if (v != ww_last[i]) {
+            if (f >= ww_from && f < ww_to && ww_count < ww_max) {
+                printf("  [write %03X] f%ld l%03d %02X:%04X  %02X->%02X  A=%02X X=%02X Y=%02X\n", ww_addr[i], f, p->line,
+                       ww_prev_bank, ww_prev_pc, ww_last[i], v, ww_prev_a, ww_prev_x, ww_prev_y);
+                ww_count++;
+            }
+            ww_last[i] = v;
+        }
+    }
+    ww_prev_pc = p->cpu.pc;
+    ww_prev_bank = p->cpu.mpr[p->cpu.pc >> 13];
+    ww_prev_a = p->cpu.a;
+    ww_prev_x = p->cpu.x;
+    ww_prev_y = p->cpu.y;
+}
+
+/* --vram-watch LO:HI: count, per instruction address, VRAM writes landing in [LO, HI]
+ * (seen as the write address register stepping), printed at the end */
+static unsigned vw_lo = 1, vw_hi = 0;
+static long vw_from = 0, vw_to = 0x7FFFFFFF;
+static uint16_t vw_last_mawr;
+static uint32_t *vw_count;   /* bank << 16 | pc */
+
+static void vram_watch(Pce *p)
+{
+    uint16_t m = p->vdc.reg[0];
+    if (m != vw_last_mawr) {
+        uint16_t prev = vw_last_mawr;
+        vw_last_mawr = m;
+        long f = (long)p->frame;
+        /* a data write advances the address from where it was */
+        if (f >= vw_from && f < vw_to && prev >= vw_lo && prev <= vw_hi && (uint16_t)(m - prev) <= 128)
+            vw_count[(uint32_t)ww_prev_bank << 16 | ww_prev_pc]++;
+    }
+}
+
+/* --scroll-log FILE: BXR, BYR (16-bit each) as set when display row 120 starts, per frame */
+static FILE *scroll_log;
+static long scroll_last = -1;
+
 static void step_hook(Pce *p, void *ctx)
 {
     (void)ctx;
+    if (vw_count) vram_watch(p);
+    if (n_ww) write_watch(p);
+    else if (vw_count) {
+        ww_prev_pc = p->cpu.pc;
+        ww_prev_bank = p->cpu.mpr[p->cpu.pc >> 13];
+    }
+    if (scroll_log && (long)p->frame != scroll_last && p->line >= p->vdc.display_start + 120) {
+        uint16_t v[2] = {p->vdc.reg[7], p->vdc.reg[8]};
+        fwrite(v, 2, 2, scroll_log);
+        scroll_last = (long)p->frame;
+    }
     uint16_t pc = p->cpu.pc;
     uint8_t bank = p->cpu.mpr[pc >> 13];
     if (prof) prof[(uint32_t)bank << 16 | pc]++;
@@ -87,6 +154,8 @@ int main(int argc, char **argv)
     struct { unsigned addr, val; } poke[16];
     struct { long frame; char path[256]; } dump[16], save_at[4];
     int n_save_at = 0;
+    struct { long frame; char path[256]; } mem_at[4];   /* --dump-mem: all 256 banks + MPRs */
+    int n_mem = 0;
     const char *load_state = NULL;
     GameCheats cheats = {0};
     GameWatch gw;
@@ -94,6 +163,15 @@ int main(int argc, char **argv)
     long skipped = 0;
     FILE *ram_trace = NULL;   /* --ram-trace FILE: WRAM after every frame */
     long start_frame = 0;
+    int wide = 0;   /* --wide N: widescreen extension in pixels per side */
+    long vram_dump_at = -1;            /* --dump-vram FRAME:FILE: all of VRAM after that frame */
+    char vram_dump_path[256] = "";
+    long run_at[16][2]; /* --run FRAME:LEN: hold the run button */
+    int n_run = 0;
+    long wrep_at[8]; /* --wide-report FRAME: which widescreen game changes are in */
+    int n_wrep = 0;
+    long sat_at[8]; /* --dump-sat FRAME: print the sprite table after that frame */
+    int n_sat = 0;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atol(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atol(argv[++i]);
@@ -137,9 +215,42 @@ int main(int argc, char **argv)
             cheats.health = strstr(c, "health") != NULL;
             cheats.hearts = strstr(c, "hearts") != NULL;
             cheats.lives = strstr(c, "lives") != NULL;
+            cheats.maria_unlocked = strstr(c, "maria") != NULL;
+            cheats.play_maria = strstr(c, "play-maria") != NULL;
         }
         else if (!strcmp(argv[i], "--skip-cinematics")) skip_cine = true;
         else if (!strcmp(argv[i], "--ram-trace") && i + 1 < argc) ram_trace = fopen(argv[++i], "wb");
+        else if (!strcmp(argv[i], "--write-watch") && i + 1 < argc) {
+            char tmp[512];
+            snprintf(tmp, sizeof tmp, "%s", argv[++i]);
+            for (char *t = strtok(tmp, ","); t && n_ww < 16; t = strtok(NULL, ","))
+                ww_addr[n_ww++] = (unsigned)strtoul(t, NULL, 16) & 0x1FFF;
+        }
+        else if (!strcmp(argv[i], "--wide") && i + 1 < argc) wide = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &vram_dump_at, vram_dump_path);
+        else if (!strcmp(argv[i], "--wide-skip") && i + 1 < argc) {   /* leave patches out: list of indexes */
+            char tmp[128];
+            snprintf(tmp, sizeof tmp, "%s", argv[++i]);
+            for (char *t = strtok(tmp, ","); t; t = strtok(NULL, ",")) wide_debug_skip |= 1u << atoi(t);
+        }
+        else if (!strcmp(argv[i], "--run") && i + 1 < argc && n_run < 16) {
+            if (sscanf(argv[++i], "%ld:%ld", &run_at[n_run][0], &run_at[n_run][1]) == 2) n_run++;
+        }
+        else if (!strcmp(argv[i], "--wide-report") && i + 1 < argc && n_wrep < 8) wrep_at[n_wrep++] = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--dump-sat") && i + 1 < argc && n_sat < 8) sat_at[n_sat++] = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--vram-watch") && i + 1 < argc) {
+            if (sscanf(argv[++i], "%x:%x", &vw_lo, &vw_hi) == 2) vw_count = calloc(1u << 24, sizeof *vw_count);
+        }
+        else if (!strcmp(argv[i], "--vram-frames") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld", &vw_from, &vw_to);
+        else if (!strcmp(argv[i], "--scroll-log") && i + 1 < argc) scroll_log = fopen(argv[++i], "wb");
+        else if (!strcmp(argv[i], "--watch-frames") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld", &ww_from, &ww_to);
+        else if (!strcmp(argv[i], "--watch-max") && i + 1 < argc) ww_max = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--dump-mem") && i + 1 < argc && n_mem < 4) {
+            char *c = argv[++i];
+            mem_at[n_mem].frame = atol(c);
+            char *colon = strchr(c, ':');
+            snprintf(mem_at[n_mem++].path, sizeof mem_at[0].path, "%s", colon ? colon + 1 : "work/mem.bin");
+        }
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
             sscanf(argv[++i], "%ld:%ld", &trace_frame, &trace_left);
         }
@@ -193,13 +304,15 @@ int main(int argc, char **argv)
     recomp_set_verify(verify);
     if (no_native || seeds_path) recomp_set_enabled(false);   /* seeds: record every entry point */
     if (seeds_path) recomp_load_misses(seeds_path);
-    if (prof || n_watch || trace_left) pce.on_step = step_hook;
+    if (prof || n_watch || trace_left || n_ww || scroll_log || vw_count) pce.on_step = step_hook;
     if (load_state) {
         if (!pce_state_load(&pce, load_state, 0, err, sizeof err)) { fprintf(stderr, "load state: %s\n", err); return 1; }
         start_frame = (long)pce.frame;
         printf("state loaded: frame %ld\n", start_frame);
     }
     game_watch_reset(&gw, &pce);
+    Wide wd = {.want = wide};
+    for (int i = 0; i < n_ww; i++) ww_last[i] = pce.wram[ww_addr[i]];
     uint8_t ram_last[32];
     for (int i = 0; i < n_ram; i++) ram_last[i] = pce.wram[ram_addr[i]];
 
@@ -224,8 +337,14 @@ int main(int argc, char **argv)
             if (f >= presses[i].frame && f < presses[i].frame + presses[i].len) pce.pad |= presses[i].mask;
         for (int i = 0; i < n_poke; i++) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
         if (skip_cine && game_in_cinematic(&pce)) { pce.pad = 0; skipped++; }
+        wide_frame(&wd, &pce);
         pce_run_frame(&pce);
         game_apply_cheats(&pce, &cheats, &gw);
+        {
+            bool run = false;
+            for (int i = 0; i < n_run; i++) run |= f >= run_at[i][0] && f < run_at[i][0] + run_at[i][1];
+            game_apply_run(&pce, run, &gw);
+        }
         if (n_ram) {
             bool changed = false;
             for (int i = 0; i < n_ram; i++) changed |= pce.wram[ram_addr[i]] != ram_last[i];
@@ -244,6 +363,38 @@ int main(int argc, char **argv)
                 FILE *df = fopen(dump[i].path, "wb");
                 if (df) { fwrite(pce.wram, 1, 0x2000, df); fclose(df); }
             }
+        for (int i = 0; i < n_wrep; i++)
+            if (wrep_at[i] == f + 1) {
+                static char buf[4096];
+                wide_report(&pce, buf, sizeof buf);
+                printf("widescreen changes after frame %ld (state %02X/%02X):\n%s", f + 1, pce.wram[0x30], pce.wram[0x31], buf);
+            }
+        for (int i = 0; i < n_sat; i++)
+            if (sat_at[i] == f + 1) {
+                printf("sprites after frame %ld (screen x, y; pattern; attr):\n", f + 1);
+                for (int k = 0; k < 64; k++) {
+                    const uint16_t *e = &pce.vdc.satb[k * 4];
+                    if (!(e[0] & 0x3FF) && !(e[1] & 0x3FF)) continue;
+                    printf("  %2d: x %4d y %4d  pat %03X attr %04X  raw x %04X\n", k, (e[1] & 0x3FF) - 32,
+                           (e[0] & 0x3FF) - 64, (e[2] >> 1) & 0x3FF, e[3], e[1]);
+                }
+            }
+        if (vram_dump_at == f + 1) {
+            FILE *vf = fopen(vram_dump_path, "wb");
+            if (vf) { fwrite(pce.vdc.vram, 2, 0x8000, vf); fclose(vf); }
+        }
+        for (int i = 0; i < n_mem; i++)
+            if (mem_at[i].frame == f + 1) {
+                /* 256 pages of 8 KiB (zeros where unmapped), then the 8 MPRs */
+                FILE *mf = fopen(mem_at[i].path, "wb");
+                static const uint8_t zero[0x2000];
+                if (mf) {
+                    for (int b = 0; b < 256; b++) fwrite(pce.page[b] ? pce.page[b] : zero, 1, 0x2000, mf);
+                    fwrite(pce.cpu.mpr, 1, 8, mf);
+                    fclose(mf);
+                    printf("memory dumped at frame %ld: %s\n", f + 1, mem_at[i].path);
+                }
+            }
         for (int i = 0; i < n_save_at; i++)
             if (save_at[i].frame == f + 1 && pce_state_save(&pce, save_at[i].path, 0, err, sizeof err))
                 printf("state saved at frame %ld: %s\n", f + 1, save_at[i].path);
@@ -253,8 +404,8 @@ int main(int argc, char **argv)
             if (!png_write_argb(path, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W))
                 fprintf(stderr, "cannot write %s (does the directory exist?)\n", path);
             HuC6280 *c = &pce.cpu;
-            printf("frame %5ld  PC=%02X:%04X  CR=%04X  %dx%d  irq_m=%02X  vec1=%02X%02X  io?=%u\n",
-                   f + 1, c->mpr[c->pc >> 13], c->pc, pce.vdc.reg[5], pce.vdc.fb_w, pce.vdc.fb_h,
+            printf("frame %5ld  PC=%02X:%04X  CR=%04X MWR=%04X SATB=%04X  %dx%d  irq_m=%02X  vec1=%02X%02X  io?=%u\n",
+                   f + 1, c->mpr[c->pc >> 13], c->pc, pce.vdc.reg[5], pce.vdc.reg[9], pce.vdc.reg[0x13], pce.vdc.fb_w, pce.vdc.fb_h,
                    pce.wram[0xF5], pce.wram[0x203], pce.wram[0x202], pce.unhandled_io);
             fflush(stdout);
         }
@@ -294,6 +445,17 @@ int main(int argc, char **argv)
     printf("\nInterrupts taken: IRQ2 %u, IRQ1 %u, timer %u; timer %s reload %u; irq_disable %X\n",
            pce.irq_taken[0], pce.irq_taken[1], pce.irq_taken[2], pce.timer_on ? "on" : "off",
            pce.timer_reload, pce.irq_disable);
+    if (vw_count) {
+        printf("VRAM writes to %04X-%04X by instruction:\n", vw_lo, vw_hi);
+        for (int k = 0; k < 24; k++) {
+            uint32_t best = 0, at = 0;
+            for (uint32_t i = 0; i < (1u << 24); i++)
+                if (vw_count[i] > best) { best = vw_count[i]; at = i; }
+            if (!best) break;
+            printf("  %02X:%04X  %u\n", at >> 16, at & 0xFFFF, best);
+            vw_count[at] = 0;
+        }
+    }
     if (prof) {
         printf("Hottest PCs outside the idle loop:\n");
         for (int k = 0; k < 16; k++) {

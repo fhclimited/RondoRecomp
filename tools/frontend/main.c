@@ -25,6 +25,7 @@
 #include "recomp/recomp.h"
 #include "settings.h"
 #include "video.h"
+#include "wide.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
 #define AUDIO_RATE 44100
@@ -137,6 +138,13 @@ static bool have_rewind;
 static GameWatch gw;
 static char pref_dir[1024];
 static bool no_save_files;   /* test runs: fresh backup RAM, nothing written to bram.bin */
+static Wide wide;            /* widescreen: decided before every frame */
+
+static void run_frame(void)
+{
+    wide_frame(&wide, &pce);
+    pce_run_frame(&pce);
+}
 
 typedef struct Session {
     char disc[1024];
@@ -432,7 +440,13 @@ int main(int argc, char **argv)
             }
         }
 
-        GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives};
+        GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives, set.maria_unlocked, set.play_maria};
+        {   /* widescreen fills the window's shape */
+            int ww, wh;
+            SDL_GetRenderOutputSize(ren, &ww, &wh);
+            wide.want = set.widescreen && wh > 0
+                            ? wide_extent((double)ww / (double)wh, video_picture_aspect(&video, &set)) : 0;
+        }
         bool rewinding = false, ran_frame = false;
         if (!menu.open) {
             if (!skipping && game_in_cinematic(&pce) &&
@@ -470,7 +484,7 @@ int main(int argc, char **argv)
                 Uint64 t0 = SDL_GetTicksNS();
                 while (game_in_cinematic(&pce) && SDL_GetTicksNS() - t0 < 12000000) {
                     pce.pad = (pce.frame & 15) < 4 ? PAD_I : 0;
-                    pce_run_frame(&pce);
+                    run_frame();
                     pce_audio_render(&pce, samples, 735);
                     game_apply_cheats(&pce, &cheats, &gw);
                     flush_bram(&ss);
@@ -495,7 +509,7 @@ int main(int argc, char **argv)
                 if (moved) {
                     pce_state_restore(&pce, rw.cur);
                     pce.pad = pad;
-                    pce_run_frame(&pce);
+                    run_frame();
                     ran_frame = true;
                 }
                 pce.bram_dirty = false;            /* rewinding never overwrites the save file */
@@ -516,8 +530,9 @@ int main(int argc, char **argv)
                     else hold_input = false;
                 }
                 pce.pad = pad;
-                pce_run_frame(&pce);
+                run_frame();
                 game_apply_cheats(&pce, &cheats, &gw);
+                game_apply_run(&pce, !features_dir && input_run_held(&in), &gw);
                 ran_frame = true;
                 if (have_rewind && set.rewind) rewind_record(&rw, &pce, pce.pad);
                 flush_bram(&ss);
@@ -543,10 +558,13 @@ int main(int argc, char **argv)
         }
 
         /* video */
-        video_upload(&video, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W);
+        video_upload(&video, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W, pce.vdc.fb_wide);
         if (features_dir && !t_shots && pce.frame >= 17880) {
             /* screenshots: 16:9 window with each picture mode, then the menu pages */
             t_shots = true;
+            TLOG("features: frame %llu state %02X/%02X drawn %d px wider (want %d, game changes %s, "
+                 "scenery %d, map %04X)\n", (unsigned long long)pce.frame, pce.wram[0x30], pce.wram[0x31],
+                 pce.vdc.fb_wide, wide.want, wide.patched ? "in" : "out", wide.scenery_moving, pce.vdc.reg[9]);
             static const struct { int aspect, integer, filter, sides; const char *name; } modes[] = {
                 {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLUR, "wide_4x3_blur"},
                 {ASPECT_STRETCH, 0, FILTER_SHARP, SIDES_BLUR, "wide_stretch"},
@@ -556,7 +574,7 @@ int main(int argc, char **argv)
             char path[1200];
             for (size_t i = 0; i < sizeof modes / sizeof modes[0]; i++) {
                 set.aspect = modes[i].aspect;
-                set.integer_scale = modes[i].integer;
+                set.scaling = modes[i].integer ? SCALE_WHOLE : SCALE_FIT;
                 set.filter = modes[i].filter;
                 set.sides = modes[i].sides;
                 video_draw(&video, &set);
@@ -576,6 +594,17 @@ int main(int argc, char **argv)
                 screenshot(ren, path);
             }
         }
+        static bool t_stage1_shot;
+        if (features_dir && !t_stage1_shot && pce.frame >= 20060) {
+            /* Stage 1 with the window's widescreen */
+            t_stage1_shot = true;
+            char path[1200];
+            video_draw(&video, &set);
+            snprintf(path, sizeof path, "%s/stage1_widescreen.bmp", features_dir);
+            screenshot(ren, path);
+            TLOG("features: Stage 1 at frame %llu drawn %d px wider on each side (game changes %s)\n",
+                 (unsigned long long)pce.frame, pce.vdc.fb_wide, wide.patched ? "in place" : "missing");
+        }
         video_draw(&video, &set);
         if (skipping) {
             draw_banner(ren, "Skipping cinematic...", false);
@@ -592,7 +621,7 @@ int main(int argc, char **argv)
         if (menu.open) menu_draw(&menu, &set, ren);
         SDL_RenderPresent(ren);
 
-        if (features_dir && pce.frame >= 20000) {
+        if (features_dir && pce.frame >= 20100) {
             TLOG("features: lowest health while playing (cheat on): %d of 92; hearts %02X; lives %02X\n",
                  t_min_health, pce.wram[RONDO_HEARTS], pce.wram[RONDO_LIVES]);
             running = false;

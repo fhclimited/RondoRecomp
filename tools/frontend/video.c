@@ -28,13 +28,19 @@ void video_free(Video *v)
     SDL_zerop(v);
 }
 
-void video_upload(Video *v, const uint32_t *fb, int w, int h, int pitch)
+void video_upload(Video *v, const uint32_t *fb, int w, int h, int pitch, int wide)
 {
     if (w <= 0 || h <= 0) return;
     SDL_Rect r = {0, 0, w, h};
     SDL_UpdateTexture(v->frame, &r, fb, pitch * 4);
     v->src_w = w;
     v->src_h = h;
+    v->src_wide = wide;
+}
+
+double video_picture_aspect(const Video *v, const Settings *s)
+{
+    return s->aspect == ASPECT_SQUARE ? 256.0 / (double)v->src_h : 4.0 / 3.0;
 }
 
 /* Where the picture goes in a ww x wh window. */
@@ -42,11 +48,13 @@ static SDL_FRect place(const Video *v, const Settings *s, int ww, int wh)
 {
     float sw = (float)v->src_w, sh = (float)v->src_h;
     if (s->aspect == ASPECT_STRETCH) return (SDL_FRect){0, 0, (float)ww, (float)wh};
-    /* aspect of the whole picture: a TV's 4:3, or square pixels */
-    float ar = s->aspect == ASPECT_SQUARE ? sw / sh : 4.0f / 3.0f;
+    /* aspect of the whole picture: a TV's 4:3 (for the 256 pixels the game normally
+     * shows; widescreen adds to the width at the same pixel shape), or square pixels */
+    float base = sw - 2.0f * (float)v->src_wide;
+    float ar = s->aspect == ASPECT_SQUARE ? sw / sh : 4.0f / 3.0f * sw / base;
     float dh = (float)wh, dw = dh * ar;
     if (dw > (float)ww) { dw = (float)ww; dh = dw / ar; }
-    if (s->integer_scale) {
+    if (s->scaling == SCALE_WHOLE) {
         /* whole multiples of the picture height (and of the width for square pixels) */
         int k = (int)floorf(dh / sh);
         if (k >= 1) {
@@ -104,7 +112,7 @@ SDL_FRect video_draw(Video *v, const Settings *s)
         SDL_RenderTexture(ren, v->blur_a, NULL, NULL);
         SDL_SetRenderTarget(ren, NULL);
         /* cover the window keeping the picture's shape, overflowing at the edges */
-        float ar = s->aspect == ASPECT_SQUARE ? (float)v->src_w / (float)v->src_h : 4.0f / 3.0f;
+        float ar = dst.w / dst.h;
         float bw = (float)ww, bh = bw / ar;
         if (bh < (float)wh) { bh = (float)wh; bw = bh * ar; }
         SDL_FRect bg = {((float)ww - bw) / 2, ((float)wh - bh) / 2, bw, bh};

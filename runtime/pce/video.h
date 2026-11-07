@@ -47,7 +47,20 @@ typedef struct Vdc {
     /* framebuffer of the active display */
     uint32_t fb[PCE_FB_MAX_W * PCE_FB_MAX_H];
     int fb_w, fb_h;
+
+    /* Widescreen (host setting, not machine state): draw this many extra pixels on each
+     * side of a 256-pixel picture, from the background map and the sprites the game
+     * places there. 0 = off, at most VDC_WIDE_MAX. fb_wide is the amount used for the
+     * current frame (latched at its start); the original picture starts at fb[fb_wide]. */
+    int wide;
+    int fb_wide;
+    /* Also host-set, used only while widescreen is drawn: background columns of the
+     * framebuffer outside [wide_x0, wide_x1) are black (beyond the room's walls);
+     * sprites are still drawn there. */
+    int wide_x0, wide_x1;
 } Vdc;
+
+#define VDC_WIDE_MAX 128
 
 void vdc_reset(Vdc *d);
 void vdc_write(Vdc *d, uint16_t off, uint8_t val);

@@ -1,6 +1,8 @@
-/* Putting the PC Engine picture on any screen: 4:3 / square-pixel / stretched, optional
- * integer scaling, sharp (crisp but even) / nearest / smooth filtering, and a blurred copy
- * of the picture to fill the sides of 16:9 and ultrawide screens. Also on-screen text. */
+/* Putting the PC Engine picture on any screen: 4:3 / square-pixel / stretched, fit to the
+ * screen or whole multiples only, sharp (crisp but even) / nearest / smooth filtering, and
+ * a blurred copy of the picture beside it on 16:9 and ultrawide screens. Widescreen
+ * pictures (wider than 256 pixels, see wide.h) keep the same pixel shape. Also on-screen
+ * text. */
 #pragma once
 
 #include <SDL3/SDL.h>
@@ -15,12 +17,16 @@ typedef struct Video {
     int sharp_w, sharp_h;
     SDL_Texture *blur_a, *blur_b;
     int src_w, src_h;
+    int src_wide;                /* extra pixels on each side of a 256-pixel picture */
 } Video;
 
 bool video_init(Video *v, SDL_Renderer *ren);
 void video_free(Video *v);
-/* Upload a new picture (ARGB8888, pitch in pixels). */
-void video_upload(Video *v, const uint32_t *fb, int w, int h, int pitch);
+/* Upload a new picture (ARGB8888, pitch in pixels); `wide` = widescreen extension per side. */
+void video_upload(Video *v, const uint32_t *fb, int w, int h, int pitch, int wide);
+/* Width / height of the screen area a 256-pixel-wide picture is shown in (4:3, or square
+ * pixels), for working out how much widescreen fills the window. */
+double video_picture_aspect(const Video *v, const Settings *s);
 /* Clear and draw the picture for the current window size; returns where it went. */
 SDL_FRect video_draw(Video *v, const Settings *s);
 
