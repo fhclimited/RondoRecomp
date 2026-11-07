@@ -182,7 +182,12 @@ drawn black (`vdc.wide_x0/x1`). The sprite changes follow each frame's wide/4:3 
 Start screen (`menu.c` page `PAGE_START`, the in-game menu's root swapped for one with Play
 at the top; the option pages return to whichever root opened them): shown when rondo.exe
 starts unless `--play` or the Start screen option is off. The game boots behind it and runs
-its attract mode with no input; Play restarts it from power-on, Load state loads into it.
+its attract mode with no input; Play restarts it from power-on and fast-forwards to the
+title screen (unless Skip cinematics is Never), Load state loads into it.
+Cinematic skipping (START, or automatic) covers the story scenes (state `$0A`) and the
+power-on intro (state `$02`, sub-states `$00`-`$01`: the narration and animated opening, about
+1:55 on both discs, during which the game itself ignores START); the intro is run with no
+buttons pressed, so the title screen (`$02`/`$02`) is not passed by.
 START / F1 plays, Back does nothing there. The mouse works on every menu page
 (`menu_item_at`, sharing the layout with `menu_draw`); the pointer is hidden while playing.
 

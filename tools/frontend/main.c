@@ -389,8 +389,9 @@ int main(int argc, char **argv)
     input_init(&in);
     Menu menu = {0};
     /* --autotest-start: the start screen for 600 frames, a mouse click on Play (a real event
-     * through the queue), 300 frames of the game, then quit */
-    int t_start_loops = 0;
+     * through the queue), 300 frames later the title screen (Play skips the logo and intro);
+     * then from power-on again, START (Enter) during the intro's story text skips it too */
+    int t_start_loops = 0, t_phase = 0, t_phase_at = 0;
     if ((!test_mode && !play_now && set.start_screen) || autotest_start) {
         menu_open_start_screen(&menu);
         start_screen_info(&menu, &ss, &set, disc_path);
@@ -401,6 +402,8 @@ int main(int argc, char **argv)
     Uint64 next = SDL_GetTicksNS();
     bool running = true, cursor_shown = true;
     bool was_rewinding = false, skipping = false, hold_input = false;
+    bool skip_intro = false;       /* the scene being skipped is the power-on intro */
+    bool skip_to_title = false;    /* Play on the start screen: on from power-on to the title screen */
     int rewind_held_frames = 0;
     /* autotest bookkeeping */
     int t_rewound = 0;
@@ -410,9 +413,11 @@ int main(int argc, char **argv)
     int t_min_health = 0x100;
 
     while (running) {
-        if (autotest_start) {
+        if (autotest_start) {          /* phases wait for the skips to finish, at any speed */
             t_start_loops++;
-            if (t_start_loops == 600) {
+            int since = t_start_loops - t_phase_at;
+            bool title = pce.wram[RONDO_STATE] == RONDO_OPENING && pce.wram[RONDO_SUB] >= 2;
+            if (t_phase == 0 && t_start_loops == 600) {
                 TLOG("autotest-start: start screen up for %d frames, game frame %llu, state %02X (attract runs behind)\n",
                      t_start_loops - 1, (unsigned long long)pce.frame, pce.wram[RONDO_STATE]);
                 int ww, wh, item_y = -1;
@@ -430,10 +435,33 @@ int main(int argc, char **argv)
                 click.button.x = wx;
                 click.button.y = wy;
                 SDL_PushEvent(&click);
-            } else if (t_start_loops == 900) {
-                TLOG("autotest-start: after clicking Play: %s, game frame %llu (from power-on), state %02X\n",
-                     menu.open ? "STILL ON THE START SCREEN" : "playing", (unsigned long long)pce.frame,
-                     pce.wram[RONDO_STATE]);
+                t_phase = 1;
+                t_phase_at = t_start_loops;
+            } else if (t_phase == 1 && ((since >= 5 && !skipping) || since > 3000)) {
+                TLOG("autotest-start: after clicking Play: %s, %d screen frames later game frame %llu, state %02X/%02X (%s)\n",
+                     menu.open ? "STILL ON THE START SCREEN" : "playing", since, (unsigned long long)pce.frame,
+                     pce.wram[RONDO_STATE], pce.wram[RONDO_SUB],
+                     title ? "the title screen: logo and intro skipped" : "NOT AT THE TITLE SCREEN");
+                start_game(&ss, ss.disc, err, sizeof err);      /* power-on, no Play */
+                skip_to_title = skipping = false;
+                t_phase = 2;
+                t_phase_at = t_start_loops;
+            } else if (t_phase == 2 && pce.frame >= 1000) {
+                TLOG("autotest-start: power-on again, frame %llu: state %02X/%02X (the intro), pressing START\n",
+                     (unsigned long long)pce.frame, pce.wram[RONDO_STATE], pce.wram[RONDO_SUB]);
+                SDL_Event key = {0};
+                key.type = SDL_EVENT_KEY_DOWN;
+                key.key.windowID = SDL_GetWindowID(win);
+                key.key.scancode = SDL_SCANCODE_RETURN;
+                key.key.key = SDLK_RETURN;
+                key.key.down = true;
+                SDL_PushEvent(&key);
+                t_phase = 3;
+                t_phase_at = t_start_loops;
+            } else if (t_phase == 3 && ((since >= 5 && !skipping) || since > 3000)) {
+                TLOG("autotest-start: %d screen frames after START: game frame %llu, state %02X/%02X (%s)\n", since,
+                     (unsigned long long)pce.frame, pce.wram[RONDO_STATE], pce.wram[RONDO_SUB],
+                     title ? "the title screen: intro skipped" : "INTRO NOT SKIPPED");
                 running = false;
             }
         }
@@ -499,6 +527,9 @@ int main(int argc, char **argv)
                         menu.open = false;
                         hold_input = true;
                         skipping = was_rewinding = false;
+                        /* the intro played behind the start screen: on to the title screen,
+                         * unless story scenes are never skipped */
+                        skip_to_title = set.skip != SKIP_OFF;
                     } else {
                         snprintf(menu.status, sizeof menu.status, "%.100s", err);
                     }
@@ -507,7 +538,7 @@ int main(int argc, char **argv)
                     if (start_game(&ss, ss.disc, err, sizeof err)) {
                         menu_open_start_screen(&menu);
                         start_screen_info(&menu, &ss, &set, disc_path);
-                        skipping = was_rewinding = false;
+                        skipping = was_rewinding = skip_to_title = false;
                     } else {
                         snprintf(menu.status, sizeof menu.status, "%.100s", err);
                     }
@@ -598,9 +629,14 @@ int main(int argc, char **argv)
             run_frame();
             ran_frame = true;
         } else if (!menu.open) {
-            if (!skipping && game_in_cinematic(&pce) &&
-                (set.skip == SKIP_AUTO || (set.skip == SKIP_START && start_pressed))) {
+            /* Play on the start screen goes on to the title screen: from power-on (the logo,
+             * state $00) through the intro */
+            bool to_title = skip_to_title && (game_state(&pce) == 0x00 || game_in_intro(&pce));
+            if (skip_to_title && !to_title) skip_to_title = false;
+            if (!skipping && (to_title || (game_in_skippable(&pce) &&
+                              (set.skip == SKIP_AUTO || (set.skip == SKIP_START && start_pressed))))) {
                 skipping = true;
+                skip_intro = !game_in_cinematic(&pce);
                 if (features_dir) { t_cine_start = (long)pce.frame; t_cine_ns = SDL_GetTicksNS(); }
             }
             rewinding = set.rewind && have_rewind && !skipping && input_rewind_held(&in);
@@ -628,25 +664,31 @@ int main(int argc, char **argv)
             }
 
             if (skipping) {
-                /* run the cinematic as fast as possible (input: an occasional I press, in case a
-                 * scene waits for a button), silently, ~12 ms per displayed frame */
+                /* run the scene as fast as possible, silently, ~12 ms per displayed frame (input:
+                 * in a story scene an occasional I press, in case it waits for a button; none in
+                 * the intro, which ignores buttons, so the title screen is not passed by) */
                 Uint64 t0 = SDL_GetTicksNS();
-                while (game_in_cinematic(&pce) && SDL_GetTicksNS() - t0 < 12000000) {
-                    pce.pad = (pce.frame & 15) < 4 ? PAD_I : 0;
+                while ((skip_intro ? game_in_intro(&pce) || (skip_to_title && game_state(&pce) == 0x00)
+                                   : game_in_cinematic(&pce)) &&
+                       SDL_GetTicksNS() - t0 < 12000000) {
+                    pce.pad = !skip_intro && (pce.frame & 15) < 4 ? PAD_I : 0;
                     run_frame();
                     pce_audio_render(&pce, samples, 735);
                     game_apply_cheats(&pce, &cheats, &gw);
                     flush_bram(&ss);
                 }
                 ran_frame = true;
-                if (!game_in_cinematic(&pce)) {
+                bool still = skip_intro ? game_in_intro(&pce) || (skip_to_title && game_state(&pce) == 0x00)
+                                        : game_in_cinematic(&pce);
+                if (!still) {
                     skipping = false;
+                    if (skip_intro) skip_to_title = false;
                     hold_input = true;
                     if (have_rewind) rewind_record(&rw, &pce, 0);   /* one step back over the whole scene */
                     if (features_dir) {
                         t_cine_end = (long)pce.frame;
-                        TLOG("features: cinematic frames %ld-%ld skipped in %.2f s\n", t_cine_start, t_cine_end,
-                             (double)(SDL_GetTicksNS() - t_cine_ns) / 1e9);
+                        TLOG("features: %s frames %ld-%ld skipped in %.2f s\n", skip_intro ? "intro" : "cinematic",
+                             t_cine_start, t_cine_end, (double)(SDL_GetTicksNS() - t_cine_ns) / 1e9);
                     }
                 }
             } else if (rewinding) {
@@ -793,7 +835,7 @@ int main(int argc, char **argv)
         }
         video_draw(&video, &set);
         if (skipping) {
-            draw_banner(ren, "Skipping cinematic...", false);
+            draw_banner(ren, skip_intro ? "Skipping the intro..." : "Skipping cinematic...", false);
         } else if (rewinding) {
             char line[64];
             float secs = (float)rewind_frames(&rw) / (float)FRAME_RATE;
@@ -802,7 +844,7 @@ int main(int argc, char **argv)
         } else if (SDL_GetTicks() < osd_until) {
             draw_banner(ren, osd_text, false);
         }
-        if (!menu.open && !skipping && set.skip == SKIP_START && game_in_cinematic(&pce))
+        if (!menu.open && !skipping && set.skip == SKIP_START && game_in_skippable(&pce))
             draw_banner(ren, "START: skip", true);
         if (menu.open) menu_draw(&menu, &set, ren);
         SDL_RenderPresent(ren);

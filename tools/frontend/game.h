@@ -59,6 +59,12 @@ typedef struct GameWatch {
 
 static inline uint8_t game_state(const Pce *p) { return p->wram[RONDO_STATE]; }
 static inline bool game_in_cinematic(const Pce *p) { return game_state(p) == RONDO_CINEMATIC; }
+/* The power-on intro: the story narration and the animated opening (state $02, sub-states
+ * $00-$01, about 1:55 on both discs). The game ignores START until the title screen
+ * (sub-state $02); later returns to the title skip it ($00 -> $02/$03). */
+static inline bool game_in_intro(const Pce *p) { return game_state(p) == RONDO_OPENING && p->wram[RONDO_SUB] <= 0x01; }
+/* What the frontend's cinematic skipping covers: story scenes and the power-on intro. */
+static inline bool game_in_skippable(const Pce *p) { return game_in_cinematic(p) || game_in_intro(p); }
 static inline bool game_playing(const Pce *p) { return game_state(p) == RONDO_PLAYING; }
 
 void game_watch_reset(GameWatch *w, const Pce *p);

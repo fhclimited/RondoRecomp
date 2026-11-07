@@ -51,7 +51,8 @@ same 1.25). Jumps started while running keep the speed. Maria runs too.
 Start screen
 ------------
 rondo.exe opens on a start screen, with the game's own attract mode running behind it:
-Play (START, Enter, A, or a click), the language, loading a save state, the option pages
+Play (START, Enter, A, or a click; it goes on to the game's title screen, past the logo and
+intro, which play behind the start screen), the language, loading a save state, the option pages
 below, Setup (to add the other language's disc or rebuild; rondo.exe closes so Setup can
 rebuild it) and Quit. Controller, keyboard and mouse all work. Menu, Start screen comes
 back to it. Gameplay, Start screen: Off goes straight into the game (rondo.exe --play
@@ -70,7 +71,8 @@ Video      Fullscreen (uses the screen's own resolution, e.g. 4K)
            Filter: Sharp (crisp, even pixels), Nearest, or Smooth
            Beside the picture: when the picture is narrower than the screen, a blurred
            copy of it, or black
-Gameplay   Skip cinematics: press START during a story scene to skip it, or skip them
+Gameplay   Skip cinematics: press START during a story scene or the power-on intro (the
+           story narration and opening before the title screen) to skip it, or skip them
            automatically, or never
            Rewind on/off, volume, Start screen on/off
 Cheats     Infinite health, infinite hearts (always 99), infinite lives
