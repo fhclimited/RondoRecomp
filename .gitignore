@@ -1,0 +1,13 @@
+# Game data and everything derived from it stays local
+work/
+*.iso
+*.bin
+*.wav
+*.cue
+*.chd
+*.pce
+
+# Build output
+build/
+__pycache__/
+*.pyc
