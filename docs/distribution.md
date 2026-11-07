@@ -37,33 +37,45 @@ The generated C and the extracted data stay on the player's PC and are never red
 
 ## Current state
 
-Steps 1 and 2 of the work plan are done (command line). From a repository build:
+All five steps are done.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang && cmake --build build   # also assembles build/sdk
 tools/fetch_zig.sh                                                             # pinned Zig 0.17.0 -> build/zig
-build/rondo_setup.exe <disc.zip | disc.cue> --out <install dir> --sdk build/sdk --zig build/zig/zig.exe
+tools/package_release.sh 0.2       # dist/RondoRecomp + dist/RondoRecomp-0.2-windows-x64.zip
 ```
 
-A release will place `sdk/` and `zig/` next to `rondo_setup.exe`, so those flags are not needed.
-Setup writes `<install dir>/rondo.exe`, its DLLs, `game/` (the extracted disc) and `build/`
-(generated code and compiler cache). The first build takes about 15 s because Zig prepares its
-C library once. `rondo.exe` looks for `game/` next to itself before anything else.
+Release folder (412 MB unpacked, 103 MB zipped; Zig is most of it):
 
-The runtime is compiled from source by Setup (`sdk/sources.txt`) instead of being shipped as a
-prebuilt library, so the runtime and the generated code always use the same compiler and C library.
-SDL3 is linked through its import library, passed by path.
+| File | |
+|---|---|
+| `RondoRecomp Setup.exe` | Setup with a window: choose the zip, watch progress, Play / Rebuild |
+| `rondo_setup.exe` | the same steps from the command line (`--rebuild` too) |
+| `sdk/` | runtime and frontend sources, SDL3 headers and import library, DLLs for rondo.exe |
+| `zig/` | C compiler used by Setup |
+| `README.txt`, `THIRD_PARTY.txt` | player instructions, third-party licenses |
 
-Checked: the zip may keep the disc in a subfolder; every file a CUE references must be present;
-entries are CRC-checked while extracting; non-PC Engine or unknown discs are refused (unknown ones
-can be allowed with `--allow-unknown`); nothing replaces `game/` until the new disc passes the check.
+What Setup does (about 40 s; the first build also prepares Zig's C library):
+
+1. import the zip (CUE + tracks, subfolders allowed, CRC-checked, Zip64 aware)
+2. check the disc (PC Engine signature, boot-sector fingerprint); stage in `game.tmp/`, then `game/`
+3. recompile: run the game headless to find its code, emit C into `build/gen/` (docs/recompiler.md)
+4. build: `zig cc` compiles the runtime + generated C into `rondo.exe` (GUI subsystem), copies DLLs
+
+`rondo.exe` uses `game/` next to itself, keeps saves in `%APPDATA%\RondoRecomp`, records code it
+had to interpret in `misses.txt`, and writes `rondo.log` (share of CPU cycles run natively).
+`Rebuild` / `--rebuild` recompiles with those misses.
+
+Tested from the packaged zip unpacked into an empty folder: Setup built rondo.exe from the
+zipped disc with no options, and the game ran at 99.9% native CPU cycles.
+
+Possible follow-ups: trim the Zig toolchain like LASRecomp's `tools/zig_slim.sh` does (most of
+the download), and an icon and version resource for the executables.
 
 ## Work plan
 
-1. ~~Setup core (command line first): zip import, identification, extraction.~~ Done.
-2. ~~Build orchestration: runtime SDK, `zig cc` invocation, `rondo.exe` output (interpreter only at
-   this stage, so the whole flow works end to end).~~ Done.
-3. Recompiler: code discovery across all overlays (static analysis plus recorded traces), C emitter,
-   runtime dispatch that checks which overlay is loaded, interpreter fallback.
-4. Setup GUI (SDL3): file picker, progress, clear error messages.
-5. Release packaging: script that assembles the release zip and fetches the pinned Zig toolchain.
+1. ~~Setup core: zip import, identification, extraction.~~ Done.
+2. ~~Build orchestration: runtime SDK, `zig cc`, `rondo.exe`.~~ Done.
+3. ~~Recompiler~~ Done (see docs/recompiler.md).
+4. ~~Setup GUI.~~ Done (`RondoRecomp Setup.exe`).
+5. ~~Release packaging.~~ Done (`tools/package_release.sh`).

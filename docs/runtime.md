@@ -64,9 +64,10 @@ the boot code reads. No System Card image is needed.
 System Card functions implemented: CD_BASE, CD_READ (all modes), CD_STAT, CD_PLAY, CD_SEARCH,
 CD_PAUSE, CD_FADE, AD_TRANS, EX_GETVER, EX_SETVEC, EX_JOYSNS, EX_SCRMOD, EX_SCRSIZ, EX_DOTMOD,
 EX_MEMOPEN, MA_MUL8U/8S/16U, MA_DIV16U/16S.
-Stubbed for now (return success): AD_PLAY/CPLAY/STOP/STAT (ADPCM voice), BM_* (save data is
-not kept), EX_SATCLR. Not yet implemented: EX_GETFNT (font glyphs). PSG (sound effects) is not
-emulated yet.
+BM_FORMAT/FREE/READ/WRITE/DELETE/FILES: backup RAM in the System Card's file format (`bram.c`),
+saved by the frontend in the user's pref folder.
+Stubbed for now (return success): AD_PLAY/CPLAY/STOP/STAT (ADPCM voice), EX_SATCLR. Not yet
+implemented: EX_GETFNT (font glyphs). PSG (sound effects) is not emulated yet.
 
 CD audio: CD_PLAY/CD_SEARCH positions are BCD MSF (`$40`), LBA (`$00`) or track number (`$80`);
 the low bits of the end-type byte select repeat (1) or play once. `pce_audio_render()` streams the

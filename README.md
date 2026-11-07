@@ -19,27 +19,33 @@ python tools/explore_main.py  <game.cue>   # resident code map (bank-aware) → 
 
 Findings so far: [docs/findings.md](docs/findings.md).
 
-## Runtime
+## Status
 
-C11 + CMake. So far: a HuC6280 interpreter that passes 253/256 opcodes of the
-SingleStepTests suite (99.94% of 640,000 tests), plus the PC Engine hardware and System Card
-functions needed to run the game from boot through the intro, title and save menu, with
-CD audio. `build/rondo.exe <game.cue>` opens it in a window (SDL3). Game code still runs on
-the interpreter; static recompilation comes next. Details: [docs/runtime.md](docs/runtime.md).
+- **Static recompiler:** Setup recompiles the game's code from the player's disc into C and
+  builds a native `rondo.exe` with a bundled Zig compiler. On a 20,000-frame run through
+  Stage 0, 99.5% of CPU cycles run natively; 389,350 native chunk executions were checked
+  against the interpreter with no differences. See [docs/recompiler.md](docs/recompiler.md).
+- **Runtime:** HuC6280 interpreter (253/256 opcodes pass every SingleStepTests case), PC Engine
+  video, CD audio, backup RAM saves, and the System Card functions the game uses, reimplemented
+  in C (no BIOS needed). See [docs/runtime.md](docs/runtime.md).
+- **Not yet:** PSG sound effects and ADPCM voice clips.
 
-## Setup (player flow)
+## For players
 
-`rondo_setup` takes the player's own zipped disc image, checks it, extracts it and builds
-`rondo.exe` on their machine with a bundled Zig C compiler. See
+Download the release, run `RondoRecomp Setup.exe`, choose a zip of your own disc image, then
+click Play. See [docs/PLAYER_README.txt](docs/PLAYER_README.txt) and
 [docs/distribution.md](docs/distribution.md).
 
 ## Layout
 
-- `runtime/cpu/` HuC6280 interpreter
+- `runtime/cpu/` HuC6280 interpreter and shared instruction semantics
+- `runtime/pce/` PC Engine system, video, disc, backup RAM, System Card replacement
+- `runtime/recomp/` native-code dispatch and verification
 - `tests/` conformance test runners
 - `tools/pce/` platform code: disc access, HuC6280 decoder, System Card table, banked code explorer
 - `tools/rondo/` game-specific formats (overlay loader)
-- `tools/setup/` Setup: zip import, disc check, code generation, build with zig cc
+- `tools/setup/` Setup (command line and window): zip import, disc check, recompile, build with zig cc
+- `tools/recomp/` code generator and capture script
 - `tools/frontend/` windowed frontend (SDL3)
 - `docs/` notes
 - `work/` local output and test data (ignored)

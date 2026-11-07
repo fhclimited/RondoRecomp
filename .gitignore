@@ -11,3 +11,6 @@ work/
 build/
 __pycache__/
 *.pyc
+
+# Release output
+dist/

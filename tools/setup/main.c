@@ -15,8 +15,11 @@
  * Defaults: DIR = folder of this program, SDK = DIR/sdk, ZIG = DIR/zig/zig.exe.
  */
 #include <SDL3/SDL.h>
+#ifndef SETUP_GUI
 #include <SDL3/SDL_main.h>
+#endif
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +29,29 @@
 #include "zip.h"
 
 #define SETUP_VERSION "0.2"
+
+/* ---- output hooks (stdout for the command line; the GUI installs its own) ------------- */
+
+static void cli_line(const char *line) { fputs(line, stdout); }
+static void cli_progress(const char *what, int pct)
+{
+    printf("\r    %s %3d%%", what, pct);
+    if (pct >= 100) printf("\n");
+    fflush(stdout);
+}
+void (*setup_line_hook)(const char *text) = cli_line;
+void (*setup_progress_hook)(const char *what, int pct) = cli_progress;
+
+static void say(const char *fmt, ...)
+{
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    setup_line_hook(buf);
+}
+
 #define MAX_FILES 128
 
 static char g_err[512];
@@ -141,12 +167,11 @@ static void progress(void *ctx, uint64_t done, uint64_t total)
 {
     static int last = -1;
     int pct = total ? (int)(done * 100 / total) : 100;
-    if (pct != last && (pct % 10 == 0)) {
-        printf("\r    %s %3d%%", (const char *)ctx, pct);
-        fflush(stdout);
+    if (pct != last && (pct % 10 == 0 || pct == 100)) {
+        setup_progress_hook((const char *)ctx, pct);
         last = pct;
     }
-    if (done == total) { printf("\n"); last = -1; }
+    if (done == total) last = -1;
 }
 
 /* Extract one candidate CUE (and its files) from the zip into `stage`; returns the staged cue path. */
@@ -210,7 +235,7 @@ static bool import_cue(const char *cue_path, const char *stage, char *cue_out, s
         char src[1100], dest[1100];
         join(src, sizeof src, cdir, names[i]);
         join(dest, sizeof dest, stage, names[i]);
-        printf("    %s\n", names[i]);
+        say("    %s\n", names[i]);
         if (!make_dirs_for(dest) || !SDL_CopyFile(src, dest)) {
             snprintf(g_err, sizeof g_err, "cannot copy %s", src);
             return false;
@@ -221,7 +246,7 @@ static bool import_cue(const char *cue_path, const char *stage, char *cue_out, s
 
 /* ---- generate + build ------------------------------------------------------------ */
 
-static void gen_log(const char *line) { printf("  %s\n", line); }
+static void gen_log(const char *line) { say("  %s\n", line); }
 
 /* Recompile the game's code from the extracted disc into gen_dir. */
 static bool generate(const char *game_cue, const char *gen_dir, const char *misses, uint64_t fingerprint)
@@ -236,7 +261,7 @@ static bool generate(const char *game_cue, const char *gen_dir, const char *miss
     go.build_id = build_id;
     if (misses && SDL_GetPathInfo(misses, NULL)) {
         go.seed_files[0] = misses;
-        printf("  using entry points recorded while playing (%s)\n", misses);
+        say("  using entry points recorded while playing (%s)\n", misses);
     }
     GenStats gs;
     return gen_run(&go, &gs, gen_log, g_err, sizeof g_err);
@@ -283,6 +308,7 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     args[n++] = "-O2";
     args[n++] = "-std=c11";
     args[n++] = "-w";
+    args[n++] = "-s";                          /* no debug info / .pdb */
     args[n++] = opt_i1;
     args[n++] = opt_i2;
     args[n++] = opt_i3;
@@ -312,7 +338,7 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     SDL_Environment *env = SDL_GetEnvironment();
     SDL_SetEnvironmentVariable(env, "ZIG_GLOBAL_CACHE_DIR", cache, true);
     SDL_SetEnvironmentVariable(env, "ZIG_LOCAL_CACHE_DIR", cache, true);
-    printf("    compiling %d source files (runtime + recompiled game code; the first build also prepares\n"
+    say("    compiling %d source files (runtime + recompiled game code; the first build also prepares\n"
            "    the C library, which takes longer)\n", s);
     if (!run(args)) return false;
 
@@ -323,7 +349,11 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
         join(src, sizeof src, sdk, "bin");
         join(src, sizeof src, src, dlls[i]);
         join(dst, sizeof dst, out, dlls[i]);
-        if (SDL_GetPathInfo(src, NULL) && !SDL_CopyFile(src, dst)) {
+        SDL_PathInfo si, di;
+        if (!SDL_GetPathInfo(src, &si)) continue;
+        /* already there (e.g. Setup itself runs from this folder with the same DLL loaded) */
+        if (SDL_GetPathInfo(dst, &di) && di.size == si.size) continue;
+        if (!SDL_CopyFile(src, dst)) {
             snprintf(g_err, sizeof g_err, "cannot copy %s", src);
             return false;
         }
@@ -335,13 +365,12 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
 
 static int fail(const char *step)
 {
-    fprintf(stderr, "\nSetup failed while %s:\n  %s\n", step, g_err);
+    say("\nSetup failed while %s:\n  %s\n", step, g_err);
     return 1;
 }
 
-int main(int argc, char **argv)
+int setup_main(int argc, char **argv)
 {
-    setvbuf(stdout, NULL, _IONBF, 0);   /* keep progress and errors in order */
     const char *input = NULL, *out_arg = NULL, *sdk_arg = NULL, *zig_arg = NULL;
     bool allow_unknown = false, do_build = true, rebuild = false;
     for (int i = 1; i < argc; i++) {
@@ -377,21 +406,19 @@ int main(int argc, char **argv)
     uint64_t fp = 0;
 
     if (rebuild) {
-        printf("RondoRecomp Setup " SETUP_VERSION " (rebuild)\n\n[1/4] Using the extracted disc in %s\n", game);
+        say("RondoRecomp Setup " SETUP_VERSION " (rebuild)\n\n[1/4] Using the extracted disc in %s\n", game);
         int count = 0;
         char **cues = SDL_GlobDirectory(game, "*.cue", SDL_GLOB_CASEINSENSITIVE, &count);
         if (cues && count > 0) join(game_cue, sizeof game_cue, game, cues[0]);
         SDL_free(cues);
         if (!game_cue[0]) { snprintf(g_err, sizeof g_err, "no extracted disc in %s; run Setup with your zip first", game); return fail("rebuilding"); }
-        printf("\n[2/4] Checking the disc\n");
+        say("\n[2/4] Checking the disc\n");
         kind = discid_identify(game_cue, &fp);
         if (kind == DISC_INVALID) { snprintf(g_err, sizeof g_err, "%s is not a readable PC Engine CD image", game_cue); return fail("checking the disc"); }
-        printf("  %s (fingerprint %016llX)\n", kind == DISC_RONDO ? "Castlevania: Rondo of Blood" : "unknown release",
+        say("  %s (fingerprint %016llX)\n", kind == DISC_RONDO ? "Castlevania: Rondo of Blood" : "unknown release",
                (unsigned long long)fp);
     } else {
-        printf("RondoRecomp Setup " SETUP_VERSION "\n\n[1/4] Importing %s\n", input);
-        DiscKind kind = DISC_INVALID;
-        uint64_t fp = 0;
+        say("RondoRecomp Setup " SETUP_VERSION "\n\n[1/4] Importing %s\n", input);
         if (ends_with(input, ".zip")) {
             Zip z;
             if (!zip_open(&z, input, g_err, sizeof g_err)) return fail("opening the zip");
@@ -399,11 +426,11 @@ int main(int argc, char **argv)
             for (int i = 0; i < z.n && kind != DISC_RONDO; i++) {
                 if (!ends_with(z.entries[i].name, ".cue")) continue;
                 cues++;
-                printf("  found %s\n", z.entries[i].name);
-                if (!import_zip_cue(&z, &z.entries[i], stage, cue, sizeof cue)) { printf("  skipped: %s\n", g_err); continue; }
+                say("  found %s\n", z.entries[i].name);
+                if (!import_zip_cue(&z, &z.entries[i], stage, cue, sizeof cue)) { say("  skipped: %s\n", g_err); continue; }
                 kind = discid_identify(cue, &fp);
                 if (kind == DISC_PCE_UNKNOWN && allow_unknown) break;
-                if (kind != DISC_RONDO) printf("  skipped: not a recognised Rondo of Blood disc\n");
+                if (kind != DISC_RONDO) say("  skipped: not a recognised Rondo of Blood disc\n");
             }
             zip_close(&z);
             if (!cues) { snprintf(g_err, sizeof g_err, "the zip contains no .cue file"); remove_tree(stage); return fail("importing"); }
@@ -415,7 +442,7 @@ int main(int argc, char **argv)
             return fail("importing");
         }
 
-        printf("\n[2/4] Checking the disc\n");
+        say("\n[2/4] Checking the disc\n");
         if (kind == DISC_INVALID || (kind == DISC_PCE_UNKNOWN && !allow_unknown)) {
             remove_tree(stage);
             snprintf(g_err, sizeof g_err, kind == DISC_INVALID
@@ -424,29 +451,37 @@ int main(int argc, char **argv)
                        "use --allow-unknown to try it anyway", (unsigned long long)fp);
             return fail("checking the disc");
         }
-        printf("  %s (fingerprint %016llX)\n", kind == DISC_RONDO ? "Castlevania: Rondo of Blood" : "unknown release",
+        say("  %s (fingerprint %016llX)\n", kind == DISC_RONDO ? "Castlevania: Rondo of Blood" : "unknown release",
                (unsigned long long)fp);
         remove_tree(game);
         if (!SDL_RenamePath(stage, game)) {
             snprintf(g_err, sizeof g_err, "cannot move %s to %s: %s", stage, game, SDL_GetError());
             return fail("extracting");
         }
-        printf("  extracted to %s\n", game);
+        say("  extracted to %s\n", game);
 
 
         join(game_cue, sizeof game_cue, game, basename_of(cue));
     }
 
-    printf("\n[3/4] Recompiling the game code\n");
+    say("\n[3/4] Recompiling the game code\n");
     if (!generate(game_cue, gen_dir, misses, fp)) return fail("recompiling");
 
-    if (!do_build) { printf("\nDone (--no-build).\n"); return 0; }
-    printf("\n[4/4] Building rondo.exe\n");
+    if (!do_build) { say("\nDone (--no-build).\n"); return 0; }
+    say("\n[4/4] Building rondo.exe\n");
     if (!SDL_GetPathInfo(zig, NULL)) {
         snprintf(g_err, sizeof g_err, "compiler not found at %s", zig);
         return fail("building");
     }
     if (!build(sdk, zig, out, gen_dir)) return fail("building");
-    printf("\nDone: %s/rondo.exe\n", out);
+    say("\nDone: %s/rondo.exe\n", out);
     return 0;
 }
+
+#ifndef SETUP_GUI
+int main(int argc, char **argv)
+{
+    setvbuf(stdout, NULL, _IONBF, 0);   /* keep progress and errors in order */
+    return setup_main(argc, argv);
+}
+#endif
