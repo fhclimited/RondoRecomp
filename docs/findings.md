@@ -72,10 +72,25 @@ Bank-aware recursive descent from `$4000` plus both IRQ vectors, after groups 0/
 - BIOS surface: 24 entries (CD read/seek/play/pause/stat/fade/search, ADPCM
   trans/play/cplay/stop/stat, BM_* saves, EX_* screen/vector/joypad/font, MA_MUL8U)
 
+## System Card 3.0 (checked against a Japanese v3.0 dump, `tools/explore_bios.py`)
+
+- The jump table at `$E000` has 81 entries. Our 77 names line up, including `EX_MEMOPEN` at `$E0DE`.
+- Interrupt dispatch: each hardware vector handler tests one bit of `irq_m` (zp `$F5`).
+  If the bit is set, it jumps straight through a work-RAM vector and does nothing else:
+  bit 0 → IRQ2 `($2200)`, bit 1 → IRQ1 `($2202)`, bit 2 → timer `($2204)`, bit 3 → NMI `($2206)`.
+  When the bit is clear, the BIOS IRQ1 handler does its own frame work: reads VDC status,
+  updates the scroll registers from RAM, keeps a frame counter, runs the PSG driver, reads
+  the joypads, and optionally calls the vsync (`$2208`, bit 4) and hsync (`$220A`, bit 6) hooks.
+- **Rondo sets `irq_m = $06`.** Its IRQ1 (`$4177`) and timer (`$4297`) handlers therefore get the
+  hardware interrupts directly, and the BIOS does no per-frame or per-tick work for this game.
+  Only IRQ2 (CD/ADPCM) stays with the BIOS, and it is only used inside BIOS CD/ADPCM calls.
+- Runtime consequence: the BIOS is needed only as a library of 24 functions. Interrupts can be
+  sent straight to the game's handlers without emulating BIOS interrupt code.
+
 ## Open questions
 
 - [ ] Role of track 22 / second `CD_BASE` (error-retry mirror?) and which track carries the translation
 - [ ] Post-process routine at `$DB+4:$8006` (decompressor?) — ops `$80/$82/$83`
 - [ ] Validate heuristic jump tables and resolve RAM-vector dispatch (needs traces)
 - [ ] Code inside stage/scene overlays: entry points and size per overlay
-- [ ] Confirm System Card entry names against a 3.0 dump or a trace
+- [x] Confirm System Card entry names against a 3.0 dump (done; 4 trailing entries unnamed, unused)

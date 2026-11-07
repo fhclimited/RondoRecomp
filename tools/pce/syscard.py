@@ -31,6 +31,23 @@ def bios_name(addr: int) -> str:
     return BIOS_ENTRIES.get(addr, f"BIOS_{addr:04X}")
 
 
+# Verified against System Card 3.0 (Japan, md5 38179df8...): the jump table has 81
+# entries; the last 4 ($E0E7-$E0F0) are unnamed here and unused by Rondo.
+JUMP_TABLE_ENTRIES = 81
+
+# Interrupt dispatch. Each hardware vector handler first tests one bit of IRQ_MODE
+# (zp $F5, "irq_m"); if set it jumps straight through the work-RAM vector and the
+# BIOS does no processing of its own for that interrupt.
+IRQ_MODE = 0xF5
+RAM_VECTORS = {           # irq_m bit -> (vector address, use)
+    0: (0x2200, "IRQ2 (CD-ROM / ADPCM)"),
+    1: (0x2202, "IRQ1 (VDC)"),
+    2: (0x2204, "TIMER"),
+    3: (0x2206, "NMI"),
+    4: (0x2208, "vsync hook, called by the BIOS IRQ1 handler"),
+    6: (0x220A, "hsync hook, called by the BIOS IRQ1 handler"),
+}
+
 # Zero-page argument registers ($2000-$20FF is zero page through MPR1 = $F8)
 ZP_ARGS = {
     0xF8: "_al", 0xF9: "_ah", 0xFA: "_bl", 0xFB: "_bh",
