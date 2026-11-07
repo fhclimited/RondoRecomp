@@ -58,6 +58,7 @@ typedef struct Pce {
     uint64_t master;            /* master clock (21.477 MHz) */
     uint64_t frame;
     int line;
+    bool at_entry;              /* next instruction is a dispatch point */
 
     /* diagnostics */
     bool log_bios, log_bios_all;
@@ -66,6 +67,8 @@ typedef struct Pce {
     uint32_t irq_taken[3];      /* IRQ2, IRQ1, timer */
     uint32_t joy_reads;
     void (*on_step)(struct Pce *p, void *ctx);   /* optional per-instruction hook */
+    void (*on_entry)(struct Pce *p, void *ctx);  /* optional: at each dispatch point */
+    void *on_entry_ctx;
     void *on_step_ctx;
 } Pce;
 
@@ -76,6 +79,9 @@ bool pce_map_real_bios(Pce *p, const char *path, char *err, int err_len);
 /* Do what the System Card does before handing over to the disc: load the IPL and jump. */
 bool pce_boot(Pce *p, char *err, int err_len);
 void pce_run_frame(Pce *p);
+/* Calls a game routine (JSR-like) with A set and interrupts off, until it returns.
+ * Used by the code generator to run the game's own overlay loader. */
+bool pce_call(Pce *p, uint16_t addr, uint8_t a, long max_instructions);
 /* Mix `frames` stereo 44.1 kHz samples of audio output into out[frames*2]. */
 void pce_audio_render(Pce *p, int16_t *out, int frames);
 

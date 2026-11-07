@@ -11,7 +11,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 endif()
 
-add_library(hucpu STATIC runtime/cpu/huc6280.c)
+add_library(hucpu STATIC runtime/cpu/huc6280.c runtime/cpu/huc6280_info.c)
 target_include_directories(hucpu PUBLIC runtime)
 
 add_library(pce STATIC
@@ -20,12 +20,30 @@ add_library(pce STATIC
   runtime/pce/disc.c
   runtime/pce/discid.c
   runtime/pce/bios_hle.c
+  runtime/recomp/dispatch.c
   runtime/util/png.c)
 target_include_directories(pce PUBLIC runtime)
 target_link_libraries(pce PUBLIC hucpu)
 
-add_executable(rondo_headless tools/headless/main.c)
+add_executable(rondo_headless tools/headless/main.c runtime/recomp/recomp_none.c)
 target_link_libraries(rondo_headless PRIVATE pce)
+
+# Code generator (developer front end; Setup links the same generator)
+add_library(recompgen STATIC tools/recomp/gen.c)
+target_link_libraries(recompgen PUBLIC pce)
+add_executable(rondo_gen tools/recomp/gen_main.c runtime/recomp/recomp_none.c)
+target_link_libraries(rondo_gen PRIVATE recompgen)
+
+# Developer builds with generated code: -DRONDO_GEN_DIR=<rondo_gen --out directory>
+set(RONDO_GEN_DIR "" CACHE PATH "directory with generated regions (rondo_gen --out)")
+if(RONDO_GEN_DIR AND EXISTS "${RONDO_GEN_DIR}/table.c")
+  file(GLOB RONDO_GEN_SOURCES "${RONDO_GEN_DIR}/*.c")
+  add_library(rondogen STATIC ${RONDO_GEN_SOURCES})
+  target_include_directories(rondogen PUBLIC runtime "${RONDO_GEN_DIR}")
+  target_compile_options(rondogen PRIVATE -O1 -w)
+  add_executable(rondo_headless_rc tools/headless/main.c)
+  target_link_libraries(rondo_headless_rc PRIVATE pce rondogen)
+endif()
 
 # Windowed frontend (optional, needs SDL3)
 # also look next to the compiler (e.g. an MSYS2 prefix)

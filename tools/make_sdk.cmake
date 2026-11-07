@@ -11,11 +11,13 @@
 
 set(RUNTIME_SOURCES
   runtime/cpu/huc6280.c
+  runtime/cpu/huc6280_info.c
   runtime/pce/pce.c
   runtime/pce/video.c
   runtime/pce/disc.c
   runtime/pce/discid.c
-  runtime/pce/bios_hle.c)
+  runtime/pce/bios_hle.c
+  runtime/recomp/dispatch.c)
 set(FRONTEND_SOURCES
   tools/frontend/main.c
   tools/frontend/locate.c)

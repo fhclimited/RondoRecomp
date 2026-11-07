@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "pce/pce.h"
+#include "recomp/recomp.h"
 #include "util/png.h"
 
 typedef struct { long frame; int len; uint8_t mask; } Press;
@@ -72,7 +73,9 @@ int main(int argc, char **argv)
     long frames = 600, shot_every = 60;
     const char *out = "work/shots";
     bool log_bios = false, log_all = false;
-    const char *bios_reset = NULL, *wav_path = NULL;
+    const char *bios_reset = NULL, *wav_path = NULL, *seeds_path = NULL;
+    int verify = 0;
+    bool no_native = false;
     Press presses[64];
     int n_press = 0;
     for (int i = 2; i < argc; i++) {
@@ -84,6 +87,9 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--profile")) prof = calloc(1u << 24, sizeof *prof);
         else if (!strcmp(argv[i], "--bios-reset") && i + 1 < argc) bios_reset = argv[++i];
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav_path = argv[++i];
+        else if (!strcmp(argv[i], "--record-seeds") && i + 1 < argc) seeds_path = argv[++i];
+        else if (!strcmp(argv[i], "--verify") && i + 1 < argc) verify = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--no-native")) no_native = true;
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
             sscanf(argv[++i], "%ld:%ld", &trace_frame, &trace_left);
         }
@@ -133,6 +139,9 @@ int main(int argc, char **argv)
     }
     pce.log_bios = log_bios;
     pce.log_bios_all = log_all;
+    recomp_set_verify(verify);
+    if (no_native || seeds_path) recomp_set_enabled(false);   /* seeds: record every entry point */
+    if (seeds_path) recomp_load_misses(seeds_path);
     if (prof || n_watch || trace_left) pce.on_step = step_hook;
 
     /* --wav: 44.1 kHz stereo 16-bit output; header sizes patched at the end */
@@ -178,6 +187,18 @@ int main(int argc, char **argv)
         fseek(wav, 0, SEEK_SET);
         fwrite(h, 1, 44, wav);
         fclose(wav);
+    }
+    {
+        const RecompStats *rs = recomp_stats();
+        uint64_t tot = rs->native_cycles + rs->interp_cycles;
+        printf("\nRecompiled code: %s, %d regions; %.2f%% of CPU cycles native; %llu region calls; "
+               "%u entry points without a region",
+               recomp_build_id, recomp_chunk_count, tot ? 100.0 * (double)rs->native_cycles / (double)tot : 0.0,
+               (unsigned long long)rs->calls, rs->miss_entries);
+        if (verify) printf("; verified %llu, failures %llu", (unsigned long long)rs->verify_runs,
+                           (unsigned long long)rs->verify_failures);
+        printf("\n");
+        if (seeds_path && recomp_write_misses(seeds_path)) printf("Seeds written to %s\n", seeds_path);
     }
     printf("\nBIOS calls:");
     for (int i = 0; i < PCE_BIOS_ENTRIES; i++)

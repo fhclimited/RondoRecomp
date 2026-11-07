@@ -1,5 +1,6 @@
 /* PC Engine system. See pce.h. */
 #include "pce.h"
+#include "recomp/recomp.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -168,6 +169,7 @@ bool pce_init(Pce *p, const char *cue, char *err, int err_len)
     for (int i = 0xF8; i <= 0xFB; i++) p->page[i] = p->wram;   /* work RAM mirrors */
     hu_init(&p->cpu, (HuBus){p, bus_read, bus_write});
     map_fast_pages(p);
+    recomp_init();
     vdc_reset(&p->vdc);
     vce_reset(&p->vce);
     p->timer_clock = TIMER_PERIOD;
@@ -247,28 +249,97 @@ static void advance(Pce *p, int master)
     }
 }
 
+/* If the CPU is at a System Card jump-table entry, run the C replacement and return
+ * from it; returns the cycles used, or -1 if the PC is not a BIOS entry. */
+static int try_hle(Pce *p)
+{
+    HuC6280 *c = &p->cpu;
+    if (p->real_bios || c->mpr[7] != 0x00 || c->pc < 0xE000 || c->pc >= 0xE000 + 3 * PCE_BIOS_ENTRIES ||
+        (c->pc - 0xE000) % 3 != 0)
+        return -1;
+    int cycles = bios_hle_call(p, (c->pc - 0xE000) / 3);
+    c->s++;
+    uint8_t lo = pce_read8(p, (uint16_t)(0x2100 | c->s));
+    c->s++;
+    uint8_t hi = pce_read8(p, (uint16_t)(0x2100 | c->s));
+    c->pc = (uint16_t)((lo | hi << 8) + 1);
+    return cycles;
+}
+
+bool pce_call(Pce *p, uint16_t addr, uint8_t a, long max_instructions)
+{
+    HuC6280 *c = &p->cpu;
+    const uint16_t done = 0xFF40;                       /* inside our bank-$00 ROM, never executed */
+    pce_write8(p, (uint16_t)(0x2100 | c->s), (uint8_t)((done - 1) >> 8));
+    c->s--;
+    pce_write8(p, (uint16_t)(0x2100 | c->s), (uint8_t)(done - 1));
+    c->s--;
+    c->pc = addr;
+    c->a = a;
+    c->p |= HU_FLAG_I;
+    for (long i = 0; i < max_instructions; i++) {
+        if (c->pc == done && c->mpr[7] == 0x00) return true;
+        if (try_hle(p) >= 0) continue;
+        c->irq_pending = 0;
+        hu_step(c);
+    }
+    return false;
+}
+
+/* Opcodes after which execution continues at a dispatch point: control transfers and
+ * the instructions that end a recompiled region. (RTI is left out: it returns to
+ * wherever an interrupt happened.) */
+static bool creates_entry(uint8_t op)
+{
+    switch (op) {
+    case 0x10: case 0x30: case 0x50: case 0x70: case 0x90: case 0xB0: case 0xD0: case 0xF0:
+    case 0x80: case 0x4C: case 0x6C: case 0x7C: case 0x20: case 0x44: case 0x60: case 0x00:
+    case 0x53: case 0x73: case 0xC3: case 0xD3: case 0xE3: case 0xF3:
+    case 0x58: case 0x78: case 0x28: case 0x54: case 0xD4:
+        return true;
+    default:
+        return (op & 0x0F) == 0x0F;   /* BBR / BBS */
+    }
+}
+
 static void run_line(Pce *p)
 {
     HuC6280 *c = &p->cpu;
     uint64_t end = p->master + PCE_MASTER_PER_LINE;
+    bool native = recomp_enabled();
     while (p->master < end) {
-        if (!p->real_bios && c->mpr[7] == 0x00 && c->pc >= 0xE000 && c->pc < 0xE000 + 3 * PCE_BIOS_ENTRIES &&
-            (c->pc - 0xE000) % 3 == 0) {
-            int cycles = bios_hle_call(p, (c->pc - 0xE000) / 3);
-            c->s++;
-            uint8_t lo = pce_read8(p, (uint16_t)(0x2100 | c->s));
-            c->s++;
-            uint8_t hi = pce_read8(p, (uint16_t)(0x2100 | c->s));
-            c->pc = (uint16_t)((lo | hi << 8) + 1);
-            advance(p, cycles * 3);
+        int hle = try_hle(p);
+        if (hle >= 0) {
+            advance(p, hle * 3);
+            p->at_entry = true;
             continue;
         }
         uint8_t lines = (uint8_t)((p->vdc.irq ? HU_IRQ1 : 0) | (p->timer_irq ? HU_TIRQ : 0));
         c->irq_pending = lines & (uint8_t)~p->irq_disable;
-        if (c->irq_pending && !(c->p & HU_FLAG_I))
-            p->irq_taken[(c->irq_pending & HU_TIRQ) ? 2 : (c->irq_pending & HU_IRQ1) ? 1 : 0]++;
+        bool irq = c->irq_pending && !(c->p & HU_FLAG_I);
+        if (p->at_entry && !irq && p->on_entry) p->on_entry(p, p->on_entry_ctx);
+
+        if (native && !irq && !(c->p & HU_FLAG_T)) {
+            const RecompChunk *k = recomp_lookup(c);
+            if (k) {
+                int mult = c->high_speed ? 3 : 12;
+                int budget = (int)((end - p->master + (uint64_t)mult - 1) / (uint64_t)mult);
+                int n = recomp_run(p, k, budget);
+                if (n >= 0) {
+                    advance(p, n * mult);
+                    p->at_entry = true;
+                    continue;
+                }
+            }
+        }
+        if (p->at_entry && !irq) recomp_note_miss(c);
+        if (irq) p->irq_taken[(c->irq_pending & HU_TIRQ) ? 2 : (c->irq_pending & HU_IRQ1) ? 1 : 0]++;
         if (p->on_step) p->on_step(p, p->on_step_ctx);
+        const uint8_t *pg = c->page_ptr[c->mpr[c->pc >> 13]];
+        uint8_t op = pg ? pg[c->pc & 0x1FFF] : 0xEA;
         int n = hu_step(c);
+        recomp_note_interp(n);
+        p->at_entry = irq || creates_entry(op);
         advance(p, n * (c->high_speed ? 3 : 12));
     }
 }
