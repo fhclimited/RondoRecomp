@@ -33,9 +33,13 @@ static const char *const LANGS[] = {"English", "Japanese"};
 static const char *const SLOTS[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
 static const char *const VOLUMES[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
 
-#define F(x) offsetof(Settings, x)
-#define CHOICE(lbl, fld, arr, base, chg) {IT_CHOICE, lbl, 0, F(fld), arr, (int)(sizeof arr / sizeof arr[0]), base, chg}
-#define TOGGLE(lbl, fld, chg) {IT_TOGGLE, lbl, 0, F(fld), OFF_ON, 2, 0, chg}
+/* a setting's offset, checked against its type at compile time (a bool read as an int
+ * picks up the bytes after it) */
+#define F_INT(x) _Generic(((Settings *)0)->x, int: offsetof(Settings, x))
+#define F_BOOL(x) _Generic(((Settings *)0)->x, bool: offsetof(Settings, x))
+#define CHOICE(lbl, fld, arr, base, chg) {IT_CHOICE, lbl, 0, F_INT(fld), arr, (int)(sizeof arr / sizeof arr[0]), base, chg}
+#define TOGGLE(lbl, fld, chg) {IT_TOGGLE, lbl, 0, F_BOOL(fld), OFF_ON, 2, 0, chg}
+#define TOGGLE_NAMED(lbl, fld, arr, chg) {IT_TOGGLE, lbl, 0, F_BOOL(fld), arr, 2, 0, chg}
 
 static const Item MAIN_ITEMS[] = {
     {IT_ACTION, "Resume", MENU_CLOSE, 0, NULL, 0, 0, 0},
@@ -52,7 +56,7 @@ static const Item MAIN_ITEMS[] = {
 };
 static const Item VIDEO_ITEMS[] = {
     TOGGLE("Fullscreen", fullscreen, MENU_VIDEO_CHANGED),
-    CHOICE("Widescreen", widescreen, WIDES, 0, MENU_SETTINGS_CHANGED),
+    TOGGLE_NAMED("Widescreen", widescreen, WIDES, MENU_SETTINGS_CHANGED),
     CHOICE("Aspect ratio", aspect, ASPECTS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Size", scaling, SCALINGS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Filter", filter, FILTERS, 0, MENU_SETTINGS_CHANGED),
@@ -110,7 +114,8 @@ static int get_value(const Settings *s, const Item *it)
 {
     const char *p = (const char *)s + it->field;
     if (it->kind == IT_TOGGLE) return *(const bool *)p ? 1 : 0;
-    return *(const int *)p - it->base;
+    int v = *(const int *)p - it->base;
+    return v < 0 ? 0 : v >= it->n_choices ? it->n_choices - 1 : v;
 }
 
 static void set_value(Settings *s, const Item *it, int v)
@@ -230,4 +235,33 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
     y += line;
     const char *hint = m->status[0] ? m->status : "A: choose   B: back   Left/Right: change";
     ui_text(ren, panel.x + (pw - (float)strlen(hint) * ch) / 2, y, k, m->status[0] ? hi : dim, hint);
+}
+
+int menu_check(Settings *s, SDL_Renderer *ren, char *err, int errlen)
+{
+    Settings keep = *s;
+    int bad = 0;
+    err[0] = 0;
+    for (int pg = 0; pg < PAGE_COUNT; pg++) {
+        Menu m = {.open = true, .page = pg};
+        for (int i = 0; i < PAGES[pg].n; i++) {
+            const Item *it = &PAGES[pg].items[i];
+            if (it->kind != IT_CHOICE && it->kind != IT_TOGGLE) continue;
+            size_t at = it->field, size = it->kind == IT_TOGGLE ? sizeof(bool) : sizeof(int);
+            m.sel[pg] = i;
+            for (int v = 0; v < it->n_choices; v++) {
+                Settings before;
+                memcpy(&before, s, sizeof before);
+                set_value(s, it, v);
+                if (get_value(s, it) != v || memcmp(s, &before, at) ||
+                    memcmp((const char *)s + at + size, (const char *)&before + at + size, sizeof *s - at - size)) {
+                    if (!bad) snprintf(err, (size_t)errlen, "%s / %s, value %d", PAGES[pg].title, it->label, v);
+                    bad++;
+                }
+                menu_draw(&m, s, ren);
+            }
+        }
+    }
+    *s = keep;
+    return bad;
 }

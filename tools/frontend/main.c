@@ -593,6 +593,10 @@ int main(int argc, char **argv)
                 snprintf(path, sizeof path, "%s/%s.bmp", features_dir, names[i]);
                 screenshot(ren, path);
             }
+            char merr[200];
+            int mbad = menu_check(&set, ren, merr, sizeof merr);
+            TLOG("features: menu check: %s%s\n", mbad ? "PROBLEM at " : "every value of every option ok",
+                 mbad ? merr : "");
         }
         static bool t_stage1_shot;
         if (features_dir && !t_stage1_shot && pce.frame >= 20060) {
