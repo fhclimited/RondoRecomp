@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct Disc;
+
 #define SND_RATE 44100
 #define SND_RING 16384                 /* stereo frames */
 
@@ -32,6 +34,12 @@ typedef struct Sound {
 
     /* ADPCM */
     const uint8_t *ram;                /* 64 KiB ADPCM RAM (owned by the system) */
+    const struct Disc *disc;           /* for AD_CPLAY streaming (owned by the system) */
+    bool ad_stream;                    /* data comes from the CD, not ADPCM RAM */
+    int ad_stream_lba;                 /* next sector to read */
+    uint16_t ad_stream_off;            /* byte offset in the cached sector */
+    int ad_sec_lba;                    /* sector in ad_sec, -1 = none */
+    uint8_t ad_sec[2048];
     bool ad_playing, ad_repeat;
     uint16_t ad_start, ad_addr;
     uint32_t ad_len, ad_left;          /* bytes */
@@ -53,7 +61,7 @@ typedef struct Sound {
     uint32_t head, count;
 } Sound;
 
-void sound_reset(Sound *s, const uint8_t *adpcm_ram);
+void sound_reset(Sound *s, const uint8_t *adpcm_ram, const struct Disc *disc);
 /* Render output up to master clock `now`. */
 void sound_advance(Sound *s, uint64_t now);
 /* PSG register write at master clock `now` (reg = address & 15). */
@@ -61,6 +69,8 @@ void sound_psg_write(Sound *s, uint64_t now, uint8_t reg, uint8_t v);
 /* ADPCM playback from ADPCM RAM (AD_PLAY): rate 0..15 = 32 kHz / (16 - rate). */
 void sound_adpcm_play(Sound *s, uint64_t now, uint16_t start, uint32_t len, uint8_t rate, bool repeat);
 void sound_adpcm_stop(Sound *s, uint64_t now);
+/* AD_CPLAY: stream `bytes` of ADPCM straight from the CD starting at absolute `lba`. */
+void sound_adpcm_stream(Sound *s, uint64_t now, int lba, uint32_t bytes, uint8_t rate);
 /* Fade the ADPCM volume out (step per output block; 0 = cancel and restore). */
 void sound_adpcm_fade(Sound *s, int step);
 /* Take up to n frames of mixed PSG + ADPCM output (adds to out); returns frames taken. */

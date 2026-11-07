@@ -373,6 +373,16 @@ int bios_hle_call(Pce *p, int idx)
         p->cpu.a = 0;
         return 100;
     case AD_PLAY: return ad_play(p);
+    case AD_CPLAY: {
+        /* stream from the CD: _cl/_ch/_dl = start record, _al/_ah/_bl = length in sectors,
+         * _dh = rate (0-15) */
+        if (DH(p) >= 16) { p->cpu.a = 0x01; return 100; }
+        int lba = p->cd_base[0] + arg_sector(p);
+        uint32_t sectors = (uint32_t)(AL(p) | AH(p) << 8 | BL(p) << 16);
+        sound_adpcm_stream(&p->snd, p->master, lba, sectors * 2048u, DH(p));
+        p->cpu.a = 0;
+        return 3000;
+    }
     case AD_STAT:
         p->cpu.a = p->snd.ad_playing ? 0x01 : 0x00;     /* non-zero while playing */
         return 50;

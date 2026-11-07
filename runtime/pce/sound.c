@@ -1,6 +1,8 @@
 /* PC Engine PSG + ADPCM. See sound.h. */
 #include "sound.h"
 
+#include "disc.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -27,10 +29,12 @@ static void update_amp(Sound *s, PsgChannel *c)
     c->amp_r = level(vol, c->balance & 15, s->global_balance & 15);
 }
 
-void sound_reset(Sound *s, const uint8_t *adpcm_ram)
+void sound_reset(Sound *s, const uint8_t *adpcm_ram, const struct Disc *disc)
 {
     memset(s, 0, sizeof *s);
     s->ram = adpcm_ram;
+    s->disc = disc;
+    s->ad_sec_lba = -1;
     for (int i = 0; i < 6; i++) s->ch[i].lfsr = 1;
     s->ad_volume = 256;
 }
@@ -66,11 +70,15 @@ void sound_psg_write(Sound *s, uint64_t now, uint8_t reg, uint8_t v)
         break;
     case 7: if (c && s->select >= 4) c->noise = v; break;
     case 8: s->lfo_freq = v; break;
-    case 9: s->lfo_ctrl = v; if (v & 3) s->lfo_used = true; break;
+    case 9:
+        s->lfo_ctrl = v;
+        if (v & 3) s->lfo_used = true;
+        if (v & 0x80) s->ch[1].phase = 0;                /* LFO reset */
+        break;
     }
 }
 
-static float psg_channel(PsgChannel *c, int index)
+static float psg_channel(PsgChannel *c, int index, double period_override)
 {
     if (!(c->control & 0x80)) return 0.0f;
     int sample;
@@ -86,7 +94,7 @@ static float psg_channel(PsgChannel *c, int index)
         }
         sample = (c->lfsr & 1) ? 0x1F : 0x00;
     } else {
-        double period = c->freq ? c->freq : 4096;
+        double period = period_override > 0 ? period_override : (c->freq ? c->freq : 4096);
         if (period < 8) return 0.0f;                     /* above audible range: silent */
         c->phase += PSG_PER_SAMPLE / period;
         if (c->phase >= 32.0) c->phase = fmod(c->phase, 32.0);
@@ -104,11 +112,28 @@ static const int16_t step_table[49] = {
 };
 static const int8_t index_adjust[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
 
+static uint8_t adpcm_byte(Sound *s)
+{
+    if (!s->ad_stream) return s->ram[s->ad_addr];
+    if (s->ad_sec_lba != s->ad_stream_lba) {
+        if (!s->disc || !disc_read_data(s->disc, s->ad_stream_lba, 1, s->ad_sec)) memset(s->ad_sec, 0x88, sizeof s->ad_sec);
+        s->ad_sec_lba = s->ad_stream_lba;
+    }
+    return s->ad_sec[s->ad_stream_off];
+}
+
+static void adpcm_advance_byte(Sound *s)
+{
+    s->ad_left--;
+    if (!s->ad_stream) { s->ad_addr++; return; }
+    if (++s->ad_stream_off == 2048) { s->ad_stream_off = 0; s->ad_stream_lba++; }
+}
+
 static int adpcm_next(Sound *s)
 {
-    uint8_t b = s->ram[s->ad_addr];
+    uint8_t b = adpcm_byte(s);
     int n = s->ad_high ? b >> 4 : b & 15;
-    if (s->ad_high) { s->ad_addr++; s->ad_left--; }
+    if (s->ad_high) adpcm_advance_byte(s);
     s->ad_high = !s->ad_high;
     int st = step_table[s->ad_index];
     int diff = st >> 3;
@@ -139,6 +164,7 @@ static void adpcm_restart(Sound *s)
 void sound_adpcm_play(Sound *s, uint64_t now, uint16_t start, uint32_t len, uint8_t rate, bool repeat)
 {
     sound_advance(s, now);
+    s->ad_stream = false;
     s->ad_start = start;
     s->ad_len = len;
     s->ad_rate = rate & 15;
@@ -151,6 +177,25 @@ void sound_adpcm_stop(Sound *s, uint64_t now)
 {
     sound_advance(s, now);
     s->ad_playing = false;
+}
+
+void sound_adpcm_stream(Sound *s, uint64_t now, int lba, uint32_t bytes, uint8_t rate)
+{
+    sound_advance(s, now);
+    s->ad_stream = true;
+    s->ad_stream_lba = lba;
+    s->ad_stream_off = 0;
+    s->ad_sec_lba = -1;
+    s->ad_len = bytes;
+    s->ad_rate = rate & 15;
+    s->ad_repeat = false;
+    s->ad_left = bytes;
+    s->ad_high = false;
+    s->ad_signal = 0;
+    s->ad_index = 0;
+    s->ad_prev = s->ad_cur = 0;
+    s->ad_phase = 0;
+    s->ad_playing = bytes > 0;
 }
 
 void sound_adpcm_fade(Sound *s, int step)
@@ -189,9 +234,24 @@ void sound_advance(Sound *s, uint64_t now)
     s->frac -= n;
     for (int i = 0; i < n; i++) {
         float l = 0, r = 0;
+        double ch0_period = 0;
+        bool lfo = (s->lfo_ctrl & 3) && !(s->lfo_ctrl & 0x80);
+        if (lfo) {
+            /* LFO: channel 1's waveform, clocked lfo_freq times slower, is added to channel 0's
+             * period (x1, x16 or x256); channel 1 is not heard */
+            static const int shift[4] = {0, 0, 4, 8};
+            PsgChannel *m = &s->ch[1];
+            double mp = (double)(m->freq ? m->freq : 4096) * (s->lfo_freq ? s->lfo_freq : 256);
+            m->phase += PSG_PER_SAMPLE / mp;
+            if (m->phase >= 32.0) m->phase = fmod(m->phase, 32.0);
+            int mod = (int)m->wave[(int)m->phase & 31] - 16;
+            ch0_period = (double)(s->ch[0].freq ? s->ch[0].freq : 4096) + (double)(mod * (1 << shift[s->lfo_ctrl & 3]));
+            if (ch0_period < 1) ch0_period = 1;
+        }
         for (int k = 0; k < 6; k++) {
+            if (lfo && k == 1) continue;
             PsgChannel *c = &s->ch[k];
-            float v = psg_channel(c, k);
+            float v = psg_channel(c, k, k == 0 ? ch0_period : 0);
             l += v * c->amp_l;
             r += v * c->amp_r;
         }

@@ -102,3 +102,7 @@ set(SST_DIR "${CMAKE_SOURCE_DIR}/work/sst/v1" CACHE PATH "SingleStepTests huc628
 enable_testing()
 # 73/C3/F3: self-overwriting wraparound block transfers, see docs/runtime.md
 add_test(NAME huc6280_sst COMMAND sst_huc6280 ${SST_DIR} -v 0 --known 73,c3,f3)
+
+add_executable(sound_test tests/sound_test.c runtime/recomp/recomp_none.c)
+target_link_libraries(sound_test PRIVATE pce)
+add_test(NAME sound COMMAND sound_test)

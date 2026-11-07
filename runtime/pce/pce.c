@@ -173,7 +173,7 @@ bool pce_init(Pce *p, const char *cue, char *err, int err_len)
     hu_init(&p->cpu, (HuBus){p, bus_read, bus_write});
     map_fast_pages(p);
     recomp_init();
-    sound_reset(&p->snd, p->adpcm);
+    sound_reset(&p->snd, p->adpcm, &p->disc);
     bram_format(p);                 /* as the System Card does for empty backup RAM */
     p->bram_dirty = false;
     vdc_reset(&p->vdc);
