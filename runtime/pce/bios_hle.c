@@ -177,6 +177,84 @@ static int joysns(Pce *p)
     return 300;
 }
 
+/* CD position argument: type in bits 6-7 of the type byte.
+ *   $00 LBA (hi, mid, lo)   $40 MSF in BCD (min, sec, frame)   $80 track number in BCD */
+static int cd_position(Pce *p, uint8_t a, uint8_t b, uint8_t c, uint8_t type)
+{
+    switch (type & 0xC0) {
+    case 0x00: return a << 16 | b << 8 | c;
+    case 0x40: return (bcd(a) * 60 + bcd(b)) * 75 + bcd(c) - 150;
+    case 0x80: {   /* a track number means the start of that track (also as an end point) */
+        const DiscTrack *t = disc_track(&p->disc, bcd(a));
+        return t ? t->lba : -1;
+    }
+    default:       /* $C0: end of the current track, handled by the caller */
+        return -1;
+    }
+}
+
+static const DiscTrack *audio_track_at(Pce *p, int lba)
+{
+    const DiscTrack *t = disc_track_at(&p->disc, lba);
+    return t && !t->data ? t : NULL;
+}
+
+/* CD_PLAY: start in _al/_ah/_bl (type _bh), end in _cl/_ch/_dl (type _dh, low bits = mode:
+ * 1 repeat, 2/3 play once). */
+static int cd_play(Pce *p)
+{
+    int start = cd_position(p, AL(p), AH(p), BL(p), BH(p));
+    const DiscTrack *t = start >= 0 ? audio_track_at(p, start) : NULL;
+    if (!t) {
+        fprintf(stderr, "[bios] CD_PLAY: start %d is not audio\n", start);
+        p->cpu.a = 0;
+        return 200;
+    }
+    int end = (DH(p) & 0xC0) == 0xC0 ? t->lba + t->sectors
+                                     : cd_position(p, CL(p), CH(p), DL(p), DH(p));
+    if (end <= start || end > t->lba + t->sectors) end = t->lba + t->sectors;
+    p->cdda.start_lba = start;
+    p->cdda.end_lba = end;
+    p->cdda.pos = (int64_t)start * 588;
+    p->cdda.repeat = (DH(p) & 0x07) == 1;
+    p->cdda.playing = true;
+    p->cdda.volume = 256;
+    p->cdda.fade_step = 0;
+    p->cpu.a = 0;
+    return 2000;
+}
+
+/* CD_SEARCH: seek to _al/_ah/_bl (type _bh); _dh low bits: 0 pause there, else play to track end. */
+static int cd_search(Pce *p)
+{
+    int start = cd_position(p, AL(p), AH(p), BL(p), BH(p));
+    const DiscTrack *t = start >= 0 ? audio_track_at(p, start) : NULL;
+    if (t) {
+        p->cdda.start_lba = start;
+        p->cdda.end_lba = t->lba + t->sectors;
+        p->cdda.pos = (int64_t)start * 588;
+        p->cdda.repeat = (DH(p) & 0x07) == 1;
+        p->cdda.playing = (DH(p) & 0x07) != 0;
+        p->cdda.volume = 256;
+        p->cdda.fade_step = 0;
+    }
+    p->cpu.a = 0;
+    return 2000;
+}
+
+/* CD_FADE: A = 0 cancel (full volume); 8/C fade out CD audio over about 6 s / 2.5 s. */
+static int cd_fade(Pce *p)
+{
+    switch (p->cpu.a & 0x0F) {
+    case 0x00: p->cdda.volume = 256; p->cdda.fade_step = 0; break;
+    case 0x08: case 0x0A: p->cdda.fade_step = -1; break;     /* ~6 s */
+    case 0x0C: case 0x0E: p->cdda.fade_step = -3; break;     /* ~2.5 s */
+    default: break;
+    }
+    p->cpu.a = 0;
+    return 100;
+}
+
 static void mul_result(Pce *p, uint32_t v)
 {
     CL(p) = (uint8_t)v; CH(p) = (uint8_t)(v >> 8);
@@ -196,9 +274,13 @@ int bios_hle_call(Pce *p, int idx)
     switch (idx) {
     case CD_BASE: return cd_base(p);
     case CD_READ: return cd_read(p);
-    case CD_PLAY: case CD_SEARCH: case CD_PAUSE: case CD_FADE:
-        p->cpu.a = 0;               /* CD audio: TODO */
+    case CD_PLAY: return cd_play(p);
+    case CD_SEARCH: return cd_search(p);
+    case CD_PAUSE:
+        p->cdda.playing = false;
+        p->cpu.a = 0;
         return 200;
+    case CD_FADE: return cd_fade(p);
     case CD_STAT:
         p->cpu.a = 0;               /* drive ready */
         return 100;

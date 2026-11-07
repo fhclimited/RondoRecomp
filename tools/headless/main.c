@@ -33,9 +33,9 @@ static void step_hook(Pce *p, void *ctx)
         if (!trace_f) trace_f = fopen("work/trace.txt", "w");
         if (trace_f) {
             HuC6280 *c = &p->cpu;
-            fprintf(trace_f, "f%llu l%03d %02X:%04X  A=%02X X=%02X Y=%02X S=%02X P=%02X  op=%02X  zp33=%02X\n",
+            fprintf(trace_f, "f%llu l%03d %02X:%04X  A=%02X X=%02X Y=%02X S=%02X P=%02X  bytes %02X %02X %02X\n",
                     (unsigned long long)p->frame, p->line, bank, pc, c->a, c->x, c->y, c->s, c->p,
-                    pce_read8(p, pc), p->wram[0x33]);
+                    pce_read8(p, pc), pce_read8(p, (uint16_t)(pc + 1)), pce_read8(p, (uint16_t)(pc + 2)));
         }
         if (--trace_left == 0 && trace_f) fclose(trace_f);
     }
@@ -72,7 +72,7 @@ int main(int argc, char **argv)
     long frames = 600, shot_every = 60;
     const char *out = "work/shots";
     bool log_bios = false, log_all = false;
-    const char *bios_reset = NULL;
+    const char *bios_reset = NULL, *wav_path = NULL;
     Press presses[64];
     int n_press = 0;
     for (int i = 2; i < argc; i++) {
@@ -83,6 +83,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--log-bios-all")) log_bios = log_all = true;
         else if (!strcmp(argv[i], "--profile")) prof = calloc(1u << 24, sizeof *prof);
         else if (!strcmp(argv[i], "--bios-reset") && i + 1 < argc) bios_reset = argv[++i];
+        else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav_path = argv[++i];
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
             sscanf(argv[++i], "%ld:%ld", &trace_frame, &trace_left);
         }
@@ -134,7 +135,22 @@ int main(int argc, char **argv)
     pce.log_bios_all = log_all;
     if (prof || n_watch || trace_left) pce.on_step = step_hook;
 
+    /* --wav: 44.1 kHz stereo 16-bit output; header sizes patched at the end */
+    FILE *wav = wav_path ? fopen(wav_path, "wb") : NULL;
+    uint32_t wav_frames = 0;
+    double audio_frac = 0;
+    if (wav) { uint8_t hdr[44] = {0}; fwrite(hdr, 1, 44, wav); }
+
     for (long f = 0; f < frames; f++) {
+        if (wav) {
+            static int16_t s[2048 * 2];
+            audio_frac += 44100.0 / (7159090.0 / (455.0 * 263.0));
+            int n = (int)audio_frac;
+            audio_frac -= n;
+            pce_audio_render(&pce, s, n);
+            fwrite(s, 4, (size_t)n, wav);
+            wav_frames += (uint32_t)n;
+        }
         pce.pad = 0;
         for (int i = 0; i < n_press; i++)
             if (f >= presses[i].frame && f < presses[i].frame + presses[i].len) pce.pad |= presses[i].mask;
@@ -150,6 +166,18 @@ int main(int argc, char **argv)
                    pce.wram[0xF5], pce.wram[0x203], pce.wram[0x202], pce.unhandled_io);
             fflush(stdout);
         }
+    }
+    if (wav) {
+        uint32_t data = wav_frames * 4;
+        uint8_t h[44] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ',
+                         16, 0, 0, 0, 1, 0, 2, 0, 0x44, 0xAC, 0, 0, 0x10, 0xB1, 2, 0, 4, 0, 16, 0,
+                         'd', 'a', 't', 'a', 0, 0, 0, 0};
+        uint32_t riff = data + 36;
+        memcpy(h + 4, &riff, 4);
+        memcpy(h + 40, &data, 4);
+        fseek(wav, 0, SEEK_SET);
+        fwrite(h, 1, 44, wav);
+        fclose(wav);
     }
     printf("\nBIOS calls:");
     for (int i = 0; i < PCE_BIOS_ENTRIES; i++)

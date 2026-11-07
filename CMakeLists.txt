@@ -26,6 +26,29 @@ target_link_libraries(pce PUBLIC hucpu)
 add_executable(rondo_headless tools/headless/main.c)
 target_link_libraries(rondo_headless PRIVATE pce)
 
+# Windowed frontend (optional, needs SDL3)
+# also look next to the compiler (e.g. an MSYS2 prefix)
+get_filename_component(_cc_prefix "${CMAKE_C_COMPILER}" DIRECTORY)
+get_filename_component(_cc_prefix "${_cc_prefix}" DIRECTORY)
+find_path(SDL3_INCLUDE_DIR SDL3/SDL.h HINTS "${_cc_prefix}/include")
+find_library(SDL3_LIBRARY NAMES SDL3 HINTS "${_cc_prefix}/lib")
+if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
+  add_executable(rondo WIN32 tools/frontend/main.c)
+  target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR})
+  target_link_libraries(rondo PRIVATE pce ${SDL3_LIBRARY})
+  get_filename_component(SDL3_LIBDIR "${SDL3_LIBRARY}" DIRECTORY)
+  # copy SDL3.dll and its non-system dependency so rondo.exe runs outside the toolchain shell
+  foreach(_dll SDL3.dll libiconv-2.dll)
+    find_file(_dll_path_${_dll} ${_dll} HINTS "${SDL3_LIBDIR}/../bin" NO_DEFAULT_PATH)
+    if(_dll_path_${_dll})
+      add_custom_command(TARGET rondo POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll_path_${_dll}}" "$<TARGET_FILE_DIR:rondo>")
+    endif()
+  endforeach()
+else()
+  message(STATUS "SDL3 not found: the windowed frontend (rondo) is not built")
+endif()
+
 # CPU conformance tests (SingleStepTests/huc6280, MIT). Download the v1 *.json.bin
 # files into work/sst/v1 (git-ignored) or point SST_DIR elsewhere.
 add_executable(sst_huc6280 tests/sst_huc6280.c)

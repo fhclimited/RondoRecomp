@@ -22,8 +22,10 @@ Findings so far: [docs/findings.md](docs/findings.md).
 ## Runtime
 
 C11 + CMake. So far: a HuC6280 interpreter that passes 253/256 opcodes of the
-SingleStepTests suite (99.94% of 640,000 tests). Build and test instructions are in
-[docs/runtime.md](docs/runtime.md).
+SingleStepTests suite (99.94% of 640,000 tests), plus the PC Engine hardware and System Card
+functions needed to run the game from boot through the intro, title and save menu, with
+CD audio. `build/rondo.exe <game.cue>` opens it in a window (SDL3). Game code still runs on
+the interpreter; static recompilation comes next. Details: [docs/runtime.md](docs/runtime.md).
 
 ## Layout
 

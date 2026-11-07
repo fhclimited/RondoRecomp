@@ -61,10 +61,34 @@ Bank `$00` holds a small ROM of our own: the interrupt stubs follow the System C
 rule (bit set in `irq_m` → jump through the work-RAM vector), plus the two bank-number bytes
 the boot code reads. No System Card image is needed.
 
-System Card functions implemented: CD_BASE, CD_READ (all modes), CD_STAT, AD_TRANS, EX_GETVER,
-EX_SETVEC, EX_JOYSNS, EX_SCRMOD, EX_SCRSIZ, EX_DOTMOD, EX_MEMOPEN, MA_MUL8U/8S/16U, MA_DIV16U/16S.
-Stubbed for now (return success): CD_PLAY, CD_SEARCH, CD_PAUSE, CD_FADE, AD_PLAY/CPLAY/STOP/STAT,
-BM_* (save data), EX_SATCLR. Not yet implemented: EX_GETFNT (font glyphs).
+System Card functions implemented: CD_BASE, CD_READ (all modes), CD_STAT, CD_PLAY, CD_SEARCH,
+CD_PAUSE, CD_FADE, AD_TRANS, EX_GETVER, EX_SETVEC, EX_JOYSNS, EX_SCRMOD, EX_SCRSIZ, EX_DOTMOD,
+EX_MEMOPEN, MA_MUL8U/8S/16U, MA_DIV16U/16S.
+Stubbed for now (return success): AD_PLAY/CPLAY/STOP/STAT (ADPCM voice), BM_* (save data is
+not kept), EX_SATCLR. Not yet implemented: EX_GETFNT (font glyphs). PSG (sound effects) is not
+emulated yet.
+
+CD audio: CD_PLAY/CD_SEARCH positions are BCD MSF (`$40`), LBA (`$00`) or track number (`$80`);
+the low bits of the end-type byte select repeat (1) or play once. `pce_audio_render()` streams the
+WAV/BIN audio tracks at 44.1 kHz with fades.
+
+## Windowed frontend (`tools/frontend`, needs SDL3)
+
+```sh
+build/rondo.exe "<path>/game.cue"
+```
+
+| Input | Keyboard | Gamepad |
+|---|---|---|
+| D-pad | arrows | d-pad / left stick |
+| I | X | East (B) |
+| II | Z | South (A) |
+| RUN | Enter | Start |
+| SELECT | Right Shift / Backspace | Back |
+| Fullscreen / quit | F11 / Esc | |
+
+Video is shown at 4:3 with nearest-neighbour scaling; frames are paced at 59.83 Hz.
+The build copies `SDL3.dll` and `libiconv-2.dll` next to the executable.
 
 ### Headless runner
 
@@ -77,7 +101,7 @@ build/rondo_headless <game.cue> --frames 3000 --shot-every 150 --out work/shots 
 The interpreter runs at about 2,600 frames per second (~43× real time).
 
 Progress so far: boot, publisher logo, the full intro, attract mode, title, and the save-file
-menu all render and run.
+menu all render and run; menu input works. `--wav FILE` records the audio output.
 
 ### Hardware behaviour this depends on
 

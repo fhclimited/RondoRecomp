@@ -45,6 +45,16 @@ typedef struct Pce {
     int cd_base[2];             /* LBA bases set by CD_BASE */
     uint8_t mwr_shadow;
 
+    /* CD-DA playback (driven by CD_PLAY / CD_SEARCH / CD_PAUSE / CD_FADE) */
+    struct {
+        bool playing;
+        bool repeat;
+        int start_lba, end_lba; /* end exclusive */
+        int64_t pos;            /* current position in stereo samples from LBA 0 */
+        int volume;             /* 0..256 */
+        int fade_step;          /* volume change per output sample block, 0 = none */
+    } cdda;
+
     uint64_t master;            /* master clock (21.477 MHz) */
     uint64_t frame;
     int line;
@@ -66,6 +76,8 @@ bool pce_map_real_bios(Pce *p, const char *path, char *err, int err_len);
 /* Do what the System Card does before handing over to the disc: load the IPL and jump. */
 bool pce_boot(Pce *p, char *err, int err_len);
 void pce_run_frame(Pce *p);
+/* Mix `frames` stereo 44.1 kHz samples of audio output into out[frames*2]. */
+void pce_audio_render(Pce *p, int16_t *out, int frames);
 
 /* logical-address helpers through the current MPRs */
 uint8_t pce_read8(Pce *p, uint16_t addr);

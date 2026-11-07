@@ -256,6 +256,38 @@ static void run_line(Pce *p)
     }
 }
 
+/* ---- audio ------------------------------------------------------------------- */
+
+void pce_audio_render(Pce *p, int16_t *out, int frames)
+{
+    memset(out, 0, (size_t)frames * 2 * sizeof *out);
+    if (!p->cdda.playing) return;
+    static uint8_t sector[2352];
+    int cached = -1;
+    for (int i = 0; i < frames; i++) {
+        if (p->cdda.pos >= (int64_t)p->cdda.end_lba * 588) {
+            if (!p->cdda.repeat) { p->cdda.playing = false; return; }
+            p->cdda.pos = (int64_t)p->cdda.start_lba * 588;
+        }
+        int lba = (int)(p->cdda.pos / 588);
+        int idx = (int)(p->cdda.pos % 588);
+        if (lba != cached) {
+            if (!disc_read_audio(&p->disc, lba, 1, sector)) { p->cdda.playing = false; return; }
+            cached = lba;
+        }
+        int16_t l = (int16_t)(sector[idx * 4] | sector[idx * 4 + 1] << 8);
+        int16_t r = (int16_t)(sector[idx * 4 + 2] | sector[idx * 4 + 3] << 8);
+        out[i * 2] = (int16_t)(l * p->cdda.volume / 256);
+        out[i * 2 + 1] = (int16_t)(r * p->cdda.volume / 256);
+        p->cdda.pos++;
+        if (p->cdda.fade_step && (i & 63) == 0) {
+            p->cdda.volume += p->cdda.fade_step;
+            if (p->cdda.volume <= 0) { p->cdda.volume = 0; p->cdda.fade_step = 0; }
+            if (p->cdda.volume >= 256) { p->cdda.volume = 256; p->cdda.fade_step = 0; }
+        }
+    }
+}
+
 void pce_run_frame(Pce *p)
 {
     for (int line = 0; line < PCE_LINES_PER_FRAME; line++) {
