@@ -112,19 +112,46 @@ WAV/BIN audio tracks at 44.1 kHz with fades.
 build/rondo.exe "<path>/game.cue"
 ```
 
-| Input | Keyboard | Gamepad |
-|---|---|---|
-| D-pad | arrows | d-pad / left stick |
-| I | X | East (B) |
-| II | Z | South (A) |
-| RUN | Enter | Start |
-| SELECT | Right Shift / Backspace | Back |
-| Rewind (hold) | R | left trigger / left shoulder |
-| Save / load state | F5 / F8 | |
-| State slot | F6 / F7 | |
-| Fullscreen / quit | F11 / Esc | |
+| Action | Gamepad | Keyboard | Sends the game |
+|---|---|---|---|
+| Move | d-pad / left stick | arrows | d-pad |
+| Jump | A (South) | X | I |
+| Attack | X (West) | Z | II |
+| Sub-weapon | B (East) | C | Up + II (macro) |
+| Item Crash | Y (North) | V | SELECT |
+| Backflip | RB | A | I, release, I (macro) |
+| Pause | Start | Enter | RUN |
+| Menu | Back | F1 / Esc | (frontend) |
+| Rewind (hold) | LT | R | (frontend) |
+| Save / load state, slot | | F5 / F8, F6 / F7 | (frontend) |
+| Fullscreen | | F11 | (frontend) |
 
-Video is shown at 4:3 with nearest-neighbour scaling; frames are paced at 59.83 Hz.
+Macros: the game ignores presses shorter than 3 frames, so each macro step lasts 4 frames;
+the backflip is the second I press while still rising (2-8 frames after the first press
+ends works, 14 is too late; measured with `rondo_headless --press`).
+
+Modules: `input.c` (mapping, macros, menu navigation), `menu.c` (pages, persisted to
+`settings.ini` by `settings.c`), `video.c` (placement and filtering), `game.c` (what the
+frontend knows about the game: main state, cheats; also linked into `rondo_headless`).
+
+Video: aspect 4:3 / square pixels / stretch, optional integer scaling, filters Sharp (nearest
+upscale to a whole factor into a render target, then linear to the final size), Nearest and
+Smooth. On wide screens the sides show the picture blurred (downscaled to 16x14, scaled up
+linearly, dimmed). The window is high-DPI aware, so fullscreen renders at the display's
+native resolution (e.g. 3840x2160). Frames are paced at 59.83 Hz.
+
+Cinematic skip: story scenes run in main state `$0A` (RUN does not skip them in the game).
+Skipping runs the emulation at full speed, silently, until the state changes (the 3,566-frame
+Stage 0 scene takes under a second), then records one rewind step across the whole scene.
+
+Cheats (`game.c`): health losses are undone while playing (state `$05`); hearts are kept at
+99 while playing, unless they drop more than 12 times a second (a tally), then left alone
+until 3 quiet seconds pass or the state changes; lives losses are undone outside the menus.
+
+Test modes: `rondo.exe --autotest` (save, load, rewind) and `rondo.exe --autotest-features
+DIR` (plays the capture script with automatic skipping and all cheats, uncapped; writes
+screenshots of the video modes and menu pages to DIR). Both log to `rondo.log` and keep
+their files in a `test` folder, never touching the player's saves.
 The build copies `SDL3.dll` and `libiconv-2.dll` next to the executable.
 
 ### Headless runner
@@ -134,6 +161,13 @@ build/rondo_headless <game.cue> --frames 3000 --shot-every 150 --out work/shots 
     [--log-bios | --log-bios-all] [--press FRAME:run,i:LEN] [--profile] \
     [--watch BANK:ADDR] [--trace FRAME:COUNT] [--bios-reset syscard3.pce]
 ```
+
+Investigation options: `--script` (the capture input script), `--ram 30,94,98` (print those
+work-RAM bytes whenever one changes), `--poke ADDR=VAL` (write before every frame),
+`--save-state FRAME:FILE` / `--load-state FILE` (start later runs mid-game), `--dump-ram
+FRAME:FILE`, `--ram-trace FILE` (work RAM + pad after every frame, for offline searches),
+`--cheats health,hearts,lives` and `--skip-cinematics` (the frontend's `game.c`). Button
+names for `--press` are lower case: `i`, `ii`, `select`, `run`, `up`, `down`, `left`, `right`.
 
 The interpreter runs at about 2,600 frames per second (~43× real time).
 

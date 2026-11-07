@@ -98,6 +98,29 @@ Bank-aware recursive descent from `$4000` plus both IRQ vectors, after groups 0/
   AD_TRANS, AD_PLAY, AD_STOP, AD_STAT (every frame), EX_JOYSNS (every frame), EX_GETFNT,
   BM_READ/WRITE/DELETE/FREE (save setup), EX_SCRSIZ.
 
+## Game state (work RAM, found by watching the game; `tools/frontend/game.h`)
+
+Addresses are offsets in work RAM (bank $F8; $2000+ in the game's address space).
+
+| Offset | Meaning |
+|---|---|
+| $30 | main state: 00 boot, 02 opening, 03 title, 04 save menu, 05 playing, 06 area change, 08 reset, 0A story cinematic |
+| $31 | sub-state of $30 |
+| $8D | lives, BCD (3 at the start) |
+| $94 | hearts, BCD (shown on the HUD; 10 at the start) |
+| $98 | health; $5C (92) is a full bar |
+| $A2 | current area (00 before Stage 0, 0A, 10, ...) |
+
+- RUN skips the opening (state 02) but not the Stage 0 cinematic (state 0A, frames 12531-16098
+  of the capture run).
+- Undoing health losses after each frame keeps Richter alive (verified through the hit at
+  frame 17865 and the death at 21924 of the capture run); undoing the lives loss at that death
+  leaves the game restarting the area normally.
+- $1460 is not an invincibility switch in this version: writing 01 every frame made Richter
+  take more hits (it is likely a per-object timer).
+- Input: presses shorter than 3 frames are ignored; a second I press 2-8 frames after the
+  first one ends makes Richter backflip.
+
 ## Open questions
 
 - [ ] Role of track 22 / second `CD_BASE` (error-retry mirror?) and which track carries the translation

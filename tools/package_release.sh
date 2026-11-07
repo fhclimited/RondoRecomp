@@ -5,7 +5,7 @@
 # usage: tools/package_release.sh [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VER=${1:-0.4}
+VER=${1:-0.5}
 B=build
 LIC=/c/msys64/ucrt64/share/licenses
 

@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "pce/pce.h"
+#include "pce/state.h"
+#include "../frontend/game.h"
 #include "recomp/recomp.h"
 #include "../recomp/capture_script.h"
 #include "util/png.h"
@@ -79,6 +81,19 @@ int main(int argc, char **argv)
     bool no_native = false, use_script = false, mute_cd = false;
     Press presses[64];
     int n_press = 0;
+    /* investigation helpers: WRAM watch, pokes, save states, WRAM dumps */
+    int n_ram = 0, n_poke = 0, n_dump = 0;
+    unsigned ram_addr[32];
+    struct { unsigned addr, val; } poke[16];
+    struct { long frame; char path[256]; } dump[16], save_at[4];
+    int n_save_at = 0;
+    const char *load_state = NULL;
+    GameCheats cheats = {0};
+    GameWatch gw;
+    bool skip_cine = false;
+    long skipped = 0;
+    FILE *ram_trace = NULL;   /* --ram-trace FILE: WRAM after every frame */
+    long start_frame = 0;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atol(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atol(argv[++i]);
@@ -94,6 +109,37 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--no-native")) no_native = true;
         else if (!strcmp(argv[i], "--script")) use_script = true;
         else if (!strcmp(argv[i], "--mute-cd")) mute_cd = true;
+        else if (!strcmp(argv[i], "--ram") && i + 1 < argc) {
+            char tmp[512];
+            snprintf(tmp, sizeof tmp, "%s", argv[++i]);
+            for (char *t = strtok(tmp, ","); t && n_ram < 32; t = strtok(NULL, ","))
+                ram_addr[n_ram++] = (unsigned)strtoul(t, NULL, 16) & 0x1FFF;
+        }
+        else if (!strcmp(argv[i], "--poke") && i + 1 < argc && n_poke < 16) {
+            unsigned a, v;
+            if (sscanf(argv[++i], "%x=%x", &a, &v) == 2) { poke[n_poke].addr = a & 0x1FFF; poke[n_poke++].val = v; }
+        }
+        else if (!strcmp(argv[i], "--dump-ram") && i + 1 < argc && n_dump < 16) {
+            char *c = argv[++i];
+            dump[n_dump].frame = atol(c);
+            char *colon = strchr(c, ':');
+            snprintf(dump[n_dump++].path, sizeof dump[0].path, "%s", colon ? colon + 1 : "work/ram.bin");
+        }
+        else if (!strcmp(argv[i], "--save-state") && i + 1 < argc && n_save_at < 4) {
+            char *c = argv[++i];
+            save_at[n_save_at].frame = atol(c);
+            char *colon = strchr(c, ':');
+            snprintf(save_at[n_save_at++].path, sizeof save_at[0].path, "%s", colon ? colon + 1 : "work/s.state");
+        }
+        else if (!strcmp(argv[i], "--load-state") && i + 1 < argc) load_state = argv[++i];
+        else if (!strcmp(argv[i], "--cheats") && i + 1 < argc) {
+            const char *c = argv[++i];
+            cheats.health = strstr(c, "health") != NULL;
+            cheats.hearts = strstr(c, "hearts") != NULL;
+            cheats.lives = strstr(c, "lives") != NULL;
+        }
+        else if (!strcmp(argv[i], "--skip-cinematics")) skip_cine = true;
+        else if (!strcmp(argv[i], "--ram-trace") && i + 1 < argc) ram_trace = fopen(argv[++i], "wb");
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
             sscanf(argv[++i], "%ld:%ld", &trace_frame, &trace_left);
         }
@@ -148,6 +194,14 @@ int main(int argc, char **argv)
     if (no_native || seeds_path) recomp_set_enabled(false);   /* seeds: record every entry point */
     if (seeds_path) recomp_load_misses(seeds_path);
     if (prof || n_watch || trace_left) pce.on_step = step_hook;
+    if (load_state) {
+        if (!pce_state_load(&pce, load_state, 0, err, sizeof err)) { fprintf(stderr, "load state: %s\n", err); return 1; }
+        start_frame = (long)pce.frame;
+        printf("state loaded: frame %ld\n", start_frame);
+    }
+    game_watch_reset(&gw, &pce);
+    uint8_t ram_last[32];
+    for (int i = 0; i < n_ram; i++) ram_last[i] = pce.wram[ram_addr[i]];
 
     /* --wav: 44.1 kHz stereo 16-bit output; header sizes patched at the end */
     FILE *wav = wav_path ? fopen(wav_path, "wb") : NULL;
@@ -155,7 +209,7 @@ int main(int argc, char **argv)
     double audio_frac = 0;
     if (wav) { uint8_t hdr[44] = {0}; fwrite(hdr, 1, 44, wav); }
 
-    for (long f = 0; f < frames; f++) {
+    for (long f = start_frame; f < start_frame + frames; f++) {
         if (wav) {
             static int16_t s[2048 * 2];
             audio_frac += 44100.0 / (7159090.0 / (455.0 * 263.0));
@@ -168,8 +222,32 @@ int main(int argc, char **argv)
         pce.pad = use_script ? capture_pad((int)f) : 0;
         for (int i = 0; i < n_press; i++)
             if (f >= presses[i].frame && f < presses[i].frame + presses[i].len) pce.pad |= presses[i].mask;
+        for (int i = 0; i < n_poke; i++) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
+        if (skip_cine && game_in_cinematic(&pce)) { pce.pad = 0; skipped++; }
         pce_run_frame(&pce);
-        if ((shot_every > 0 && (f + 1) % shot_every == 0) || f + 1 == frames) {
+        game_apply_cheats(&pce, &cheats, &gw);
+        if (n_ram) {
+            bool changed = false;
+            for (int i = 0; i < n_ram; i++) changed |= pce.wram[ram_addr[i]] != ram_last[i];
+            if (changed) {
+                printf("frame %5ld pad %02X:", f + 1, pce.pad);
+                for (int i = 0; i < n_ram; i++) {
+                    printf(" %03X=%02X%s", ram_addr[i], pce.wram[ram_addr[i]], pce.wram[ram_addr[i]] != ram_last[i] ? "*" : " ");
+                    ram_last[i] = pce.wram[ram_addr[i]];
+                }
+                printf("\n");
+            }
+        }
+        if (ram_trace) { fwrite(pce.wram, 1, 0x2000, ram_trace); fputc(pce.pad, ram_trace); }
+        for (int i = 0; i < n_dump; i++)
+            if (dump[i].frame == f + 1) {
+                FILE *df = fopen(dump[i].path, "wb");
+                if (df) { fwrite(pce.wram, 1, 0x2000, df); fclose(df); }
+            }
+        for (int i = 0; i < n_save_at; i++)
+            if (save_at[i].frame == f + 1 && pce_state_save(&pce, save_at[i].path, 0, err, sizeof err))
+                printf("state saved at frame %ld: %s\n", f + 1, save_at[i].path);
+        if ((shot_every > 0 && (f + 1) % shot_every == 0) || f + 1 == start_frame + frames) {
             char path[512];
             snprintf(path, sizeof path, "%s/frame_%05ld.png", out, f + 1);
             if (!png_write_argb(path, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W))
@@ -206,6 +284,7 @@ int main(int argc, char **argv)
         if (seeds_path && recomp_write_misses(seeds_path)) printf("Seeds written to %s\n", seeds_path);
         if (misses_path && recomp_write_misses(misses_path)) printf("Misses written to %s\n", misses_path);
     }
+    if (skip_cine) printf("Cinematic frames run with input ignored: %ld\n", skipped);
     printf("Sound: %llu PSG register writes; PSG audible for %.1f s, ADPCM for %.1f s\n",
            (unsigned long long)pce.snd.psg_writes, (double)pce.snd.psg_samples / SND_RATE,
            (double)pce.snd.adpcm_samples / SND_RATE);

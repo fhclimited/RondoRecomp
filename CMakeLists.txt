@@ -28,7 +28,7 @@ add_library(pce STATIC
 target_include_directories(pce PUBLIC runtime)
 target_link_libraries(pce PUBLIC hucpu)
 
-add_executable(rondo_headless tools/headless/main.c runtime/recomp/recomp_none.c)
+add_executable(rondo_headless tools/headless/main.c runtime/recomp/recomp_none.c tools/frontend/game.c)
 target_link_libraries(rondo_headless PRIVATE pce)
 
 # Code generator (developer front end; Setup links the same generator)
@@ -44,7 +44,7 @@ if(RONDO_GEN_DIR AND EXISTS "${RONDO_GEN_DIR}/table.c")
   add_library(rondogen STATIC ${RONDO_GEN_SOURCES})
   target_include_directories(rondogen PUBLIC runtime "${RONDO_GEN_DIR}")
   target_compile_options(rondogen PRIVATE -O1 -w)
-  add_executable(rondo_headless_rc tools/headless/main.c)
+  add_executable(rondo_headless_rc tools/headless/main.c tools/frontend/game.c)
   target_link_libraries(rondo_headless_rc PRIVATE pce rondogen)
 endif()
 
@@ -55,8 +55,10 @@ get_filename_component(_cc_prefix "${_cc_prefix}" DIRECTORY)
 find_path(SDL3_INCLUDE_DIR SDL3/SDL.h HINTS "${_cc_prefix}/include")
 find_library(SDL3_LIBRARY NAMES SDL3 HINTS "${_cc_prefix}/lib")
 if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
-  add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c runtime/recomp/recomp_none.c)
-  target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR})
+  add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c tools/frontend/game.c
+    tools/frontend/input.c tools/frontend/menu.c tools/frontend/settings.c tools/frontend/video.c
+    runtime/recomp/recomp_none.c)
+  target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR} tools/recomp)
   target_link_libraries(rondo PRIVATE pce ${SDL3_LIBRARY})
   get_filename_component(SDL3_LIBDIR "${SDL3_LIBRARY}" DIRECTORY)
   # copy SDL3.dll and its non-system dependency so rondo.exe runs outside the toolchain shell

@@ -23,7 +23,12 @@ set(RUNTIME_SOURCES
   runtime/recomp/dispatch.c)
 set(FRONTEND_SOURCES
   tools/frontend/main.c
-  tools/frontend/locate.c)
+  tools/frontend/locate.c
+  tools/frontend/game.c
+  tools/frontend/input.c
+  tools/frontend/menu.c
+  tools/frontend/settings.c
+  tools/frontend/video.c)
 
 file(REMOVE_RECURSE "${OUT}")
 foreach(dir cpu pce recomp)
@@ -32,6 +37,8 @@ foreach(dir cpu pce recomp)
 endforeach()
 file(COPY "${SRC}/tools/frontend/" DESTINATION "${OUT}/src/frontend"
      FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+# the capture input script, used by rondo.exe --autotest-features
+file(COPY "${SRC}/tools/recomp/capture_script.h" DESTINATION "${OUT}/src/frontend")
 file(COPY "${SDL_INC}/SDL3" DESTINATION "${OUT}/include")
 file(COPY "${SDL_LIB}" DESTINATION "${OUT}/lib")
 foreach(dll SDL3.dll libiconv-2.dll)

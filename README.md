@@ -27,7 +27,11 @@ Findings so far: [docs/findings.md](docs/findings.md).
   against the interpreter with no differences. See [docs/recompiler.md](docs/recompiler.md).
 - **Runtime:** HuC6280 interpreter (253/256 opcodes pass every SingleStepTests case), PC Engine
   video, sound (PSG effects, ADPCM voices, CD audio), backup RAM saves, save states, rewind,
-  and the System Card functions the game uses, reimplemented in C (no BIOS needed). See [docs/runtime.md](docs/runtime.md).
+  and the System Card functions the game uses, reimplemented in C (no BIOS needed).
+- An in-game menu (F1 / Back): video modes for 4K, 16:9 and ultrawide screens (4:3 with
+  blurred sides, square pixels, stretch, integer scaling, sharp filtering), cinematic
+  skipping, cheats (infinite health, hearts, lives), modern controller layout with
+  sub-weapon / Item Crash / backflip buttons, and a Japanese option (with your Japanese disc). See [docs/runtime.md](docs/runtime.md).
 
 ## For players
 
