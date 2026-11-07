@@ -44,6 +44,7 @@ typedef struct Pce {
 
     int cd_base[2];             /* LBA bases set by CD_BASE */
     uint8_t mwr_shadow;
+    bool bram_dirty;            /* save data changed since last written to disk */
 
     /* CD-DA playback (driven by CD_PLAY / CD_SEARCH / CD_PAUSE / CD_FADE) */
     struct {
@@ -88,6 +89,15 @@ void pce_audio_render(Pce *p, int16_t *out, int frames);
 /* logical-address helpers through the current MPRs */
 uint8_t pce_read8(Pce *p, uint16_t addr);
 void pce_write8(Pce *p, uint16_t addr, uint8_t v);
+
+/* bram.c: backup RAM file store (System Card format) */
+bool bram_formatted(const Pce *p);
+void bram_format(Pce *p);
+int bram_free(const Pce *p);
+int bram_read(Pce *p, const uint8_t name[12], uint8_t *out, int len, int offset, int *done);
+int bram_write(Pce *p, const uint8_t name[12], const uint8_t *in, int len, int offset);
+int bram_delete(Pce *p, const uint8_t name[12]);
+int bram_file_name(const Pce *p, int index, uint8_t name[12]);
 
 /* bios_hle.c */
 int bios_hle_call(Pce *p, int index);

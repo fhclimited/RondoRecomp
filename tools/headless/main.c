@@ -10,6 +10,7 @@
 
 #include "pce/pce.h"
 #include "recomp/recomp.h"
+#include "../recomp/capture_script.h"
 #include "util/png.h"
 
 typedef struct { long frame; int len; uint8_t mask; } Press;
@@ -75,7 +76,7 @@ int main(int argc, char **argv)
     bool log_bios = false, log_all = false;
     const char *bios_reset = NULL, *wav_path = NULL, *seeds_path = NULL, *misses_path = NULL;
     int verify = 0;
-    bool no_native = false;
+    bool no_native = false, use_script = false;
     Press presses[64];
     int n_press = 0;
     for (int i = 2; i < argc; i++) {
@@ -91,6 +92,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--misses") && i + 1 < argc) misses_path = argv[++i];
         else if (!strcmp(argv[i], "--verify") && i + 1 < argc) verify = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-native")) no_native = true;
+        else if (!strcmp(argv[i], "--script")) use_script = true;
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
             sscanf(argv[++i], "%ld:%ld", &trace_frame, &trace_left);
         }
@@ -161,7 +163,7 @@ int main(int argc, char **argv)
             fwrite(s, 4, (size_t)n, wav);
             wav_frames += (uint32_t)n;
         }
-        pce.pad = 0;
+        pce.pad = use_script ? capture_pad((int)f) : 0;
         for (int i = 0; i < n_press; i++)
             if (f >= presses[i].frame && f < presses[i].frame + presses[i].len) pce.pad |= presses[i].mask;
         pce_run_frame(&pce);

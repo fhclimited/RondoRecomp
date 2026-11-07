@@ -160,6 +160,17 @@ int main(int argc, char **argv)
         SDL_Quit();
         return 1;
     }
+    /* save data (backup RAM) lives in the user's pref folder */
+    char save_path[1024] = "";
+    {
+        char *dir = SDL_GetPrefPath("RondoRecomp", "RondoRecomp");
+        if (dir) { snprintf(save_path, sizeof save_path, "%sbram.bin", dir); SDL_free(dir); }
+        size_t n = 0;
+        void *data = save_path[0] ? SDL_LoadFile(save_path, &n) : NULL;
+        if (data && n >= 0x800) memcpy(pce.bram, data, 0x800);
+        SDL_free(data);
+        pce.bram_dirty = false;
+    }
 
     SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, AUDIO_RATE};
     SDL_AudioStream *audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
@@ -212,6 +223,10 @@ int main(int argc, char **argv)
 
         pce.pad = read_input(pads, n_pads);
         pce_run_frame(&pce);
+        if (pce.bram_dirty && save_path[0]) {
+            SDL_SaveFile(save_path, pce.bram, 0x800);
+            pce.bram_dirty = false;
+        }
 
         /* audio: one frame's worth, kept within ~100 ms of queued data */
         audio_frac += AUDIO_RATE / FRAME_RATE;

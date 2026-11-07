@@ -170,6 +170,8 @@ bool pce_init(Pce *p, const char *cue, char *err, int err_len)
     hu_init(&p->cpu, (HuBus){p, bus_read, bus_write});
     map_fast_pages(p);
     recomp_init();
+    bram_format(p);                 /* as the System Card does for empty backup RAM */
+    p->bram_dirty = false;
     vdc_reset(&p->vdc);
     vce_reset(&p->vce);
     p->timer_clock = TIMER_PERIOD;

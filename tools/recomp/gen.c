@@ -171,12 +171,7 @@ static void collect(Pce *p)
 
 /* ---- capture run ------------------------------------------------------------------ */
 
-/* Inputs for the headless capture run: the intro, the attract sequence, title and the
- * save menu. Frame numbers count from power-on. */
-static const struct { int frame, len; uint8_t pad; } capture_script[] = {
-    {8500, 6, PAD_RUN}, {8800, 6, PAD_RUN}, {9100, 6, PAD_RUN}, {9400, 6, PAD_RUN},
-};
-#define CAPTURE_FRAMES 14000
+#include "capture_script.h"
 
 typedef struct Seed { uint8_t bank; uint16_t addr; uint32_t h; int img; } Seed;  /* img: capture snapshot or -1 */
 static Seed *seeds;
@@ -252,10 +247,7 @@ static bool materialize(const char *cue, GenStats *st, char *err, int err_len)
      * the bank it runs from (this includes code the game assembles at runtime) */
     p->on_entry = on_entry;
     for (int f = 40; f < CAPTURE_FRAMES; f++) {
-        p->pad = 0;
-        for (size_t i = 0; i < sizeof capture_script / sizeof capture_script[0]; i++)
-            if (f >= capture_script[i].frame && f < capture_script[i].frame + capture_script[i].len)
-                p->pad |= capture_script[i].pad;
+        p->pad = capture_pad(f);
         pce_run_frame(p);
     }
     p->on_entry = NULL;
@@ -854,7 +846,7 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
     int max_total = o->max_regions > 0 ? o->max_regions * 16 : 2000000;   /* instruction safety cap */
     init_ops();
 
-    say("Running the game headless to find its code (intro, attract, menus; %d overlay groups)...", RONDO_GROUPS);
+    say("Running the game headless to find its code (intro, attract, menus, Stage 0; %d overlay groups)...", RONDO_GROUPS);
     if (!materialize(o->cue, st, err, err_len)) return false;
     say("  capture run: %d entry points; %d overlay loads; %d distinct bank images",
         st->capture_seeds, st->groups_loaded, n_images);

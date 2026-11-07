@@ -28,7 +28,7 @@ static const char *const names[PCE_BIOS_ENTRIES] = {
 enum {
     CD_BASE = 2, CD_READ = 3, CD_PLAY = 6, CD_SEARCH = 7, CD_PAUSE = 8, CD_STAT = 9, CD_FADE = 15,
     AD_RESET = 16, AD_TRANS = 17, AD_PLAY = 20, AD_CPLAY = 21, AD_STOP = 22, AD_STAT = 23,
-    BM_FREE = 25, BM_READ = 26, BM_WRITE = 27, BM_DELETE = 28,
+    BM_FORMAT = 24, BM_FREE = 25, BM_READ = 26, BM_WRITE = 27, BM_DELETE = 28, BM_FILES = 29,
     EX_GETVER = 30, EX_SETVEC = 31, EX_GETFNT = 32, EX_JOYSNS = 33, EX_SCRSIZ = 35, EX_DOTMOD = 36,
     EX_SCRMOD = 37, EX_SATCLR = 54, MA_MUL8U = 63, MA_MUL8S = 64, MA_MUL16U = 65, MA_DIV16S = 66,
     MA_DIV16U = 67, EX_MEMOPEN = 74,
@@ -256,6 +256,34 @@ static int cd_fade(Pce *p)
     return 100;
 }
 
+/* BM_READ / BM_WRITE / BM_DELETE: _ax = address of the 12-byte file name, _bx = buffer,
+ * _cx = byte count, _dx = offset in the file. A = 0 on success, 1 not found, 2 bad
+ * offset/size or checksum, 4 no space, $FF not formatted. BM_READ returns the count read in _cx. */
+static int bm_file_op(Pce *p, int idx)
+{
+    uint8_t name[12];
+    uint16_t na = (uint16_t)(AL(p) | AH(p) << 8);
+    for (int i = 0; i < 12; i++) name[i] = pce_read8(p, (uint16_t)(na + i));
+    uint16_t buf = (uint16_t)(BL(p) | BH(p) << 8);
+    int len = CL(p) | CH(p) << 8, offset = DL(p) | DH(p) << 8;
+    static uint8_t tmp[0x800];
+    if (len > (int)sizeof tmp) len = (int)sizeof tmp;
+    int r;
+    if (idx == BM_READ) {
+        int done = 0;
+        r = bram_read(p, name, tmp, len, offset, &done);
+        for (int i = 0; i < done; i++) pce_write8(p, (uint16_t)(buf + i), tmp[i]);
+        CL(p) = (uint8_t)done; CH(p) = (uint8_t)(done >> 8);
+    } else if (idx == BM_WRITE) {
+        for (int i = 0; i < len; i++) tmp[i] = pce_read8(p, (uint16_t)(buf + i));
+        r = bram_write(p, name, tmp, len, offset);
+    } else {
+        r = bram_delete(p, name);
+    }
+    p->cpu.a = (uint8_t)r;
+    return 1000 + len * 4;
+}
+
 static void mul_result(Pce *p, uint32_t v)
 {
     CL(p) = (uint8_t)v; CH(p) = (uint8_t)(v >> 8);
@@ -293,16 +321,27 @@ int bios_hle_call(Pce *p, int idx)
         return 50;
     case AD_TRANS: return ad_trans(p);
 
-    case BM_FREE:
-        CL(p) = 0xF0; CH(p) = 0x07; /* backup RAM: TODO (report an empty 2 KiB unit) */
+    case BM_FORMAT:
+        if (!bram_formatted(p)) bram_format(p);
         p->cpu.a = 0;
-        return 200;
-    case BM_READ:
-        p->cpu.a = 0x01;            /* file not found */
-        return 200;
-    case BM_WRITE: case BM_DELETE:
-        p->cpu.a = 0;
-        return 200;
+        return 2000;
+    case BM_FILES: {
+        uint8_t name[12];
+        int r = bram_file_name(p, AL(p), name);
+        if (r == 0) {
+            uint16_t dst = (uint16_t)(BL(p) | BH(p) << 8);
+            for (int i = 0; i < 12; i++) pce_write8(p, (uint16_t)(dst + i), name[i]);
+        }
+        p->cpu.a = (uint8_t)r;
+        return 300;
+    }
+    case BM_FREE: {
+        int n = bram_formatted(p) ? bram_free(p) : 0;
+        CL(p) = (uint8_t)n; CH(p) = (uint8_t)(n >> 8);
+        p->cpu.a = bram_formatted(p) ? 0 : 0xFF;
+        return 300;
+    }
+    case BM_READ: case BM_WRITE: case BM_DELETE: return bm_file_op(p, idx);
 
     case EX_GETVER:
         p->cpu.x = 3;

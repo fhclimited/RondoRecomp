@@ -17,6 +17,7 @@ set(RUNTIME_SOURCES
   runtime/pce/disc.c
   runtime/pce/discid.c
   runtime/pce/bios_hle.c
+  runtime/pce/bram.c
   runtime/recomp/dispatch.c)
 set(FRONTEND_SOURCES
   tools/frontend/main.c
