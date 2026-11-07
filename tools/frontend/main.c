@@ -86,7 +86,13 @@ int main(int argc, char **argv)
     else fprintf(stderr, "no audio: %s\n", SDL_GetError());
 
     SDL_Gamepad *pads[8] = {0};
-    int n_pads = 0;
+    int n_pads = 8;   /* slots; NULL = free */
+    {
+        int n = 0;
+        SDL_JoystickID *ids = SDL_GetGamepads(&n);   /* controllers already connected */
+        for (int i = 0; i < n && i < 8; i++) pads[i] = SDL_OpenGamepad(ids[i]);
+        SDL_free(ids);
+    }
     const double frame_ns = 1e9 / FRAME_RATE;
     double audio_frac = 0.0;
     static int16_t samples[2048 * 2];
@@ -106,7 +112,17 @@ int main(int argc, char **argv)
                     SDL_SetWindowFullscreen(win, !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
-                if (n_pads < 8) pads[n_pads++] = SDL_OpenGamepad(ev.gdevice.which);
+                if (!SDL_GetGamepadFromID(ev.gdevice.which)) {
+                    for (int i = 0; i < 8; i++)
+                        if (!pads[i]) { pads[i] = SDL_OpenGamepad(ev.gdevice.which); break; }
+                }
+                break;
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                for (int i = 0; i < 8; i++)
+                    if (pads[i] && SDL_GetGamepadID(pads[i]) == ev.gdevice.which) {
+                        SDL_CloseGamepad(pads[i]);
+                        pads[i] = NULL;
+                    }
                 break;
             default:
                 break;
