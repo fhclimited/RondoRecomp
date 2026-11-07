@@ -44,6 +44,6 @@ rondo_setup.exe --rebuild                 recompile again with misses.txt
 
 Status
 ------
-Work in progress. Not yet emulated: PSG sound effects and ADPCM voices.
+Work in progress. Music, sound effects and voices all play.
 
 Third-party software: see THIRD_PARTY.txt.

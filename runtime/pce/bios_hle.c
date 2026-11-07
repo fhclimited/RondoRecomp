@@ -27,7 +27,7 @@ static const char *const names[PCE_BIOS_ENTRIES] = {
 
 enum {
     CD_BASE = 2, CD_READ = 3, CD_PLAY = 6, CD_SEARCH = 7, CD_PAUSE = 8, CD_STAT = 9, CD_FADE = 15,
-    AD_RESET = 16, AD_TRANS = 17, AD_PLAY = 20, AD_CPLAY = 21, AD_STOP = 22, AD_STAT = 23,
+    AD_RESET = 16, AD_TRANS = 17, AD_READ = 18, AD_WRITE = 19, AD_PLAY = 20, AD_CPLAY = 21, AD_STOP = 22, AD_STAT = 23,
     BM_FORMAT = 24, BM_FREE = 25, BM_READ = 26, BM_WRITE = 27, BM_DELETE = 28, BM_FILES = 29,
     EX_GETVER = 30, EX_SETVEC = 31, EX_GETFNT = 32, EX_JOYSNS = 33, EX_SCRSIZ = 35, EX_DOTMOD = 36,
     EX_SCRMOD = 37, EX_SATCLR = 54, MA_MUL8U = 63, MA_MUL8S = 64, MA_MUL16U = 65, MA_DIV16S = 66,
@@ -247,9 +247,11 @@ static int cd_search(Pce *p)
 static int cd_fade(Pce *p)
 {
     switch (p->cpu.a & 0x0F) {
-    case 0x00: p->cdda.volume = 256; p->cdda.fade_step = 0; break;
-    case 0x08: case 0x0A: p->cdda.fade_step = -1; break;     /* ~6 s */
-    case 0x0C: case 0x0E: p->cdda.fade_step = -3; break;     /* ~2.5 s */
+    case 0x00: p->cdda.volume = 256; p->cdda.fade_step = 0; sound_adpcm_fade(&p->snd, 0); break;
+    case 0x08: p->cdda.fade_step = -1; break;                /* CD audio, ~6 s */
+    case 0x0C: p->cdda.fade_step = -3; break;                /* CD audio, ~2.5 s */
+    case 0x0A: sound_adpcm_fade(&p->snd, -1); break;         /* ADPCM, ~6 s */
+    case 0x0E: sound_adpcm_fade(&p->snd, -3); break;         /* ADPCM, ~2.5 s */
     default: break;
     }
     p->cpu.a = 0;
@@ -284,6 +286,59 @@ static int bm_file_op(Pce *p, int idx)
     return 1000 + len * 4;
 }
 
+/* AD_PLAY: _bx = start in ADPCM RAM, _ax = length in bytes, _dh = rate (0-15: 32 kHz /
+ * (16 - rate)), _dl: bit 7 repeat, low bits non-zero = replay the previous clip. */
+static int ad_play(Pce *p)
+{
+    if (!(DL(p) & 0x7F)) {
+        if (DH(p) >= 16) { p->cpu.a = 0x01; return 100; }
+        p->ad_last_start = (uint16_t)(BL(p) | BH(p) << 8);
+        p->ad_last_len = (uint16_t)(AL(p) | AH(p) << 8);
+        p->ad_last_rate = DH(p);
+    }
+    sound_adpcm_play(&p->snd, p->master, p->ad_last_start, p->ad_last_len, p->ad_last_rate, (DL(p) & 0x80) != 0);
+    p->cpu.a = 0;
+    return 200;
+}
+
+/* AD_READ (ADPCM RAM -> CPU memory) / AD_WRITE (CPU memory -> ADPCM RAM): _cx = ADPCM
+ * address, _ax = byte count, _dh = 0: CPU memory at _bx; 2-6: bank _bl through MPR[_dh];
+ * $FF: VRAM at _bx. */
+static int ad_copy(Pce *p, bool read)
+{
+    uint16_t ad = (uint16_t)(CL(p) | CH(p) << 8);
+    uint32_t len = (uint32_t)(AL(p) | AH(p) << 8);
+    uint8_t mode = DH(p);
+    uint16_t dst = (uint16_t)(BL(p) | BH(p) << 8);
+    if (mode == 0xFF) {                                   /* VRAM, words */
+        uint16_t va = dst;
+        for (uint32_t i = 0; i + 1 < len; i += 2, va++) {
+            if (va >= 0x8000) break;
+            if (read) {
+                p->vdc.vram[va] = (uint16_t)(p->adpcm[(uint16_t)(ad + i)] | p->adpcm[(uint16_t)(ad + i + 1)] << 8);
+            } else {
+                p->adpcm[(uint16_t)(ad + i)] = (uint8_t)p->vdc.vram[va];
+                p->adpcm[(uint16_t)(ad + i + 1)] = (uint8_t)(p->vdc.vram[va] >> 8);
+            }
+        }
+    } else if (mode >= 2 && mode <= 6) {                  /* through a mapped bank */
+        uint16_t base = (uint16_t)(mode << 13);
+        for (uint32_t i = 0; i < len; i++) {
+            if ((i & 0x1FFF) == 0) p->cpu.mpr[mode] = (uint8_t)(BL(p) + (i >> 13));
+            uint16_t a = (uint16_t)(base + (i & 0x1FFF));
+            if (read) pce_write8(p, a, p->adpcm[(uint16_t)(ad + i)]);
+            else p->adpcm[(uint16_t)(ad + i)] = pce_read8(p, a);
+        }
+    } else {                                              /* CPU memory at _bx */
+        for (uint32_t i = 0; i < len; i++) {
+            if (read) pce_write8(p, (uint16_t)(dst + i), p->adpcm[(uint16_t)(ad + i)]);
+            else p->adpcm[(uint16_t)(ad + i)] = pce_read8(p, (uint16_t)(dst + i));
+        }
+    }
+    p->cpu.a = 0;
+    return 500 + (int)len;
+}
+
 static void mul_result(Pce *p, uint32_t v)
 {
     CL(p) = (uint8_t)v; CH(p) = (uint8_t)(v >> 8);
@@ -313,12 +368,15 @@ int bios_hle_call(Pce *p, int idx)
     case CD_STAT:
         p->cpu.a = 0;               /* drive ready */
         return 100;
-    case AD_RESET: case AD_PLAY: case AD_CPLAY: case AD_STOP:
-        p->cpu.a = 0;               /* ADPCM playback: TODO */
+    case AD_RESET: case AD_STOP:
+        sound_adpcm_stop(&p->snd, p->master);
+        p->cpu.a = 0;
         return 100;
+    case AD_PLAY: return ad_play(p);
     case AD_STAT:
-        p->cpu.a = 0;               /* not busy */
+        p->cpu.a = p->snd.ad_playing ? 0x01 : 0x00;     /* non-zero while playing */
         return 50;
+    case AD_READ: case AD_WRITE: return ad_copy(p, idx == AD_READ);
     case AD_TRANS: return ad_trans(p);
 
     case BM_FORMAT:

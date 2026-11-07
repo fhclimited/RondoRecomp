@@ -23,12 +23,11 @@ Findings so far: [docs/findings.md](docs/findings.md).
 
 - **Static recompiler:** Setup recompiles the game's code from the player's disc into C and
   builds a native `rondo.exe` with a bundled Zig compiler. On a 20,000-frame run through
-  Stage 0, 99.5% of CPU cycles run natively; 389,350 native chunk executions were checked
+  Stage 0, 99.3% of CPU cycles run natively; 402,593 native chunk executions were checked
   against the interpreter with no differences. See [docs/recompiler.md](docs/recompiler.md).
 - **Runtime:** HuC6280 interpreter (253/256 opcodes pass every SingleStepTests case), PC Engine
-  video, CD audio, backup RAM saves, and the System Card functions the game uses, reimplemented
-  in C (no BIOS needed). See [docs/runtime.md](docs/runtime.md).
-- **Not yet:** PSG sound effects and ADPCM voice clips.
+  video, sound (PSG effects, ADPCM voices, CD audio), backup RAM saves, and the System Card
+  functions the game uses, reimplemented in C (no BIOS needed). See [docs/runtime.md](docs/runtime.md).
 
 ## For players
 

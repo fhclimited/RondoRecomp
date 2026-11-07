@@ -47,7 +47,10 @@ static void io_write(Pce *p, uint16_t off, uint8_t v)
     switch (off >> 10) {
     case 0: vdc_write(&p->vdc, off, v); return;
     case 1: vce_write(&p->vce, off, v); return;
-    case 2: p->io_buffer = v; return;                                /* PSG: TODO */
+    case 2:                                                          /* PSG */
+        p->io_buffer = v;
+        sound_psg_write(&p->snd, p->master, (uint8_t)(off & 15), v);
+        return;
     case 3:
         p->io_buffer = v;
         if (off & 1) {
@@ -170,6 +173,7 @@ bool pce_init(Pce *p, const char *cue, char *err, int err_len)
     hu_init(&p->cpu, (HuBus){p, bus_read, bus_write});
     map_fast_pages(p);
     recomp_init();
+    sound_reset(&p->snd, p->adpcm);
     bram_format(p);                 /* as the System Card does for empty backup RAM */
     p->bram_dirty = false;
     vdc_reset(&p->vdc);
@@ -348,9 +352,8 @@ static void run_line(Pce *p)
 
 /* ---- audio ------------------------------------------------------------------- */
 
-void pce_audio_render(Pce *p, int16_t *out, int frames)
+static void cdda_mix(Pce *p, int16_t *out, int frames)
 {
-    memset(out, 0, (size_t)frames * 2 * sizeof *out);
     if (!p->cdda.playing) return;
     static uint8_t sector[2352];
     int cached = -1;
@@ -376,6 +379,14 @@ void pce_audio_render(Pce *p, int16_t *out, int frames)
             if (p->cdda.volume >= 256) { p->cdda.volume = 256; p->cdda.fade_step = 0; }
         }
     }
+}
+
+void pce_audio_render(Pce *p, int16_t *out, int frames)
+{
+    memset(out, 0, (size_t)frames * 2 * sizeof *out);
+    if (!p->mute_cdda) cdda_mix(p, out, frames);
+    sound_advance(&p->snd, p->master);
+    sound_take(&p->snd, out, frames);
 }
 
 void pce_run_frame(Pce *p)

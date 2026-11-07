@@ -31,6 +31,11 @@ one 8 KiB window becomes one **chunk**, compiled as one C function that starts w
 on the PC. Every instruction of a chunk is a valid entry. Snapshots that agree on the chunk's
 code bytes share one chunk, so data-only differences between snapshots do not duplicate code.
 
+Each chunk is split into **components**: instructions connected by fallthrough, branches and
+jumps. Execution entering a component stays inside it until it leaves the chunk, so each
+component is checked against memory on its own. This matters for work banks such as `$6C`,
+whose other contents change while a routine in it stays the same.
+
 Inside a chunk, branches are `goto`s, so loops run natively. A chunk exits (sets `PC`, returns
 the cycles used) at calls, returns, indirect jumps, `TAM`, block transfers, `CLI`/`SEI`/`PLP`,
 `CSL`/`CSH`, the window edge, or a backward branch once the cycle budget for the scanline is
@@ -60,10 +65,10 @@ the capture input. Results on this disc (20,000 frames, through Stage 0 gameplay
 
 | | |
 |---|---|
-| entry points found by the capture run | 10,046 |
-| chunks / instructions / generated C | 26 / 15,536 / 2.0 MB |
-| CPU cycles run natively | 99.52% (99.9% in the intro) |
-| chunk executions verified against the interpreter | 389,350, 0 differences |
+| entry points found by the capture run | 10,354 |
+| chunks / components / instructions / generated C | 31 / 1,580 / 17,124 / 2.4 MB |
+| CPU cycles run natively | 99.33% (99.9% in the intro) |
+| chunk executions verified against the interpreter (incl. sound state) | 402,593, 0 differences |
 
 ## Tools
 

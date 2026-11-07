@@ -21,6 +21,7 @@ add_library(pce STATIC
   runtime/pce/discid.c
   runtime/pce/bios_hle.c
   runtime/pce/bram.c
+  runtime/pce/sound.c
   runtime/recomp/dispatch.c
   runtime/util/png.c)
 target_include_directories(pce PUBLIC runtime)

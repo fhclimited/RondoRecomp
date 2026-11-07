@@ -816,9 +816,113 @@ typedef struct Unique {
     uint16_t *ranges;
     uint64_t hash;
     uint64_t sig;
+    int *comp_of;                /* offset -> component record */
 } Unique;
 
 typedef struct EntryRec { uint32_t key; uint32_t chunk; } EntryRec;
+
+/* A component: instructions of a chunk connected by fallthrough, branches and jumps.
+ * Execution entering a component stays inside it until it leaves the chunk, so each
+ * component is checked against memory on its own (one table record per component). */
+typedef struct CompRec {
+    uint8_t bank;
+    int u;                       /* chunk function */
+    uint16_t n_ranges;
+    uint16_t *ranges;
+    uint64_t hash;
+} CompRec;
+
+static CompRec *comps;
+static int n_comps, cap_comps;
+
+static int uf_find(int *parent, int x)
+{
+    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+}
+
+/* Split chunk u (its sorted instructions) into components; fills comp_of[offset]. */
+static void build_components(const Image *im, uint16_t base, const Ins *ins, int n, const uint8_t *inc,
+                             const uint8_t *vol, int u, int *comp_of)
+{
+    static int parent[0x2000], comp_index[0x2000];
+    for (int o = 0; o < 0x2000; o++) { parent[o] = o; comp_index[o] = -1; comp_of[o] = -1; }
+#define INC(o) ((o) >= 0 && (o) < 0x2000 && BIT_GET(inc, (o)))
+#define UNION(a, b) do { int ra_ = uf_find(parent, (a)), rb_ = uf_find(parent, (b)); if (ra_ != rb_) parent[ra_] = rb_; } while (0)
+    for (int i = 0; i < n; i++) {
+        const Ins *in = &ins[i];
+        int off = in->addr - base, next = off + in->len;
+        int tgt = (int)in->target - (int)base;
+        switch (flow_of(in->op)) {
+        case F_SEQ: if (INC(next)) UNION(off, next); break;
+        case F_BRANCH:
+            if (INC(next)) UNION(off, next);
+            if ((in->target & 0xE000) == base && INC(tgt)) UNION(off, tgt);
+            break;
+        case F_JUMP:
+            if (!(in->op == 0x4C && in->vol) && (in->target & 0xE000) == base && INC(tgt)) UNION(off, tgt);
+            break;
+        case F_SET:
+            if (in->set_inline) {
+                Ins nx;
+                decode(im->data, base, (uint16_t)(in->addr + 1), &nx);
+                int after = next + nx.len;
+                if (INC(after)) UNION(off, after);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    /* bytes per component (an instruction's own bytes, plus the instruction inlined after SET) */
+    static uint8_t mark[0x2000 / 8];
+    for (int i = 0; i < n; i++) {
+        int off = ins[i].addr - base;
+        int r = uf_find(parent, off);
+        if (comp_index[r] < 0) {
+            if (n_comps == cap_comps) {
+                cap_comps = cap_comps ? cap_comps * 2 : 1024;
+                comps = realloc(comps, (size_t)cap_comps * sizeof *comps);
+            }
+            comp_index[r] = n_comps;
+            comps[n_comps] = (CompRec){im->bank, u, 0, NULL, 0};
+            n_comps++;
+        }
+        comp_of[off] = comp_index[r];
+    }
+    for (int c0 = 0; c0 < n_comps; c0++) {
+        if (comps[c0].u != u || comps[c0].ranges) continue;
+        memset(mark, 0, sizeof mark);
+        for (int i = 0; i < n; i++) {
+            int off = ins[i].addr - base;
+            if (comp_of[off] != c0) continue;
+            int len = ins[i].len;
+            if (flow_of(ins[i].op) == F_SET && ins[i].set_inline) {
+                Ins nx;
+                decode(im->data, base, (uint16_t)(ins[i].addr + 1), &nx);
+                len += nx.len;
+            }
+            for (int b = 0; b < len && off + b < 0x2000; b++)
+                if (!(vol && BIT_GET(vol, off + b))) BIT_SET(mark, off + b);
+        }
+        static uint16_t rr[2 * 0x2000];
+        int nr = 0;
+        for (int o = 0; o < 0x2000;) {
+            if (!BIT_GET(mark, o)) { o++; continue; }
+            int st0 = o;
+            while (o < 0x2000 && BIT_GET(mark, o)) o++;
+            rr[2 * nr] = (uint16_t)st0;
+            rr[2 * nr + 1] = (uint16_t)(o - st0);
+            nr++;
+        }
+        comps[c0].n_ranges = (uint16_t)nr;
+        comps[c0].ranges = malloc(sizeof(uint16_t) * 2 * (size_t)(nr ? nr : 1));
+        memcpy(comps[c0].ranges, rr, sizeof(uint16_t) * 2 * (size_t)nr);
+        comps[c0].hash = recomp_code_hash(im->data, rr, nr);
+    }
+#undef INC
+#undef UNION
+}
 
 static int cmp_entry(const void *a, const void *b)
 {
@@ -1054,6 +1158,8 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
             char fname[48];
             snprintf(fname, sizeof fname, "ck_%02X_%04X_%d", im->bank, k->base, u);
             emit_chunk(f, &v, fname, u, nr, k->cov, im->bank);
+            uniq[u].comp_of = malloc(sizeof(int) * 0x2000);
+            build_components(im, k->base, ins, n, k->inc, k->has_vol ? k->vol : NULL, u, uniq[u].comp_of);
             fprintf(hdr, "int %s(HuC6280 *c, int budget);\nextern const uint16_t R%d[];\n", fname, u);
             in_file++;
             st->instructions += n;
@@ -1066,7 +1172,9 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
                 cap_entries = cap_entries ? cap_entries * 2 : 16384;
                 entries = realloc(entries, (size_t)cap_entries * sizeof *entries);
             }
-            entries[n_entries++] = (EntryRec){(uint32_t)im->bank << 16 | (uint32_t)(k->base + off), (uint32_t)u};
+            int comp = uniq[u].comp_of[off];
+            if (comp < 0) continue;
+            entries[n_entries++] = (EntryRec){(uint32_t)im->bank << 16 | (uint32_t)(k->base + off), (uint32_t)comp};
         }
     }
     if (f) { bytes += (size_t)ftell(f); fclose(f); }
@@ -1087,12 +1195,19 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
         for (int i = 0; i < 2 * uniq[u].n_ranges; i++) fprintf(t, "%s%u", i ? "," : "", uniq[u].ranges[i]);
         fprintf(t, "};\n");
     }
-    fprintf(t, "\nconst RecompChunk recomp_chunks[%d] = {\n", n_uniq ? n_uniq : 1);
-    for (int u = 0; u < n_uniq; u++)
-        fprintf(t, "    {0x%02X, %u, R%d, 0x%016llXull, ck_%02X_%04X_%d},\n", uniq[u].bank, uniq[u].n_ranges, u,
-                (unsigned long long)uniq[u].hash, uniq[u].bank, uniq[u].base, u);
-    if (!n_uniq) fprintf(t, "    {0}\n");
-    fprintf(t, "};\nconst int recomp_chunk_count = %d;\n\n", n_uniq);
+    for (int c0 = 0; c0 < n_comps; c0++) {
+        fprintf(t, "static const uint16_t C%d[] = {", c0);
+        for (int i = 0; i < 2 * comps[c0].n_ranges; i++) fprintf(t, "%s%u", i ? "," : "", comps[c0].ranges[i]);
+        fprintf(t, "%s};\n", comps[c0].n_ranges ? "" : "0");
+    }
+    fprintf(t, "\nconst RecompChunk recomp_chunks[%d] = {\n", n_comps ? n_comps : 1);
+    for (int c0 = 0; c0 < n_comps; c0++) {
+        int u = comps[c0].u;
+        fprintf(t, "    {0x%02X, %u, C%d, 0x%016llXull, ck_%02X_%04X_%d},\n", comps[c0].bank, comps[c0].n_ranges, c0,
+                (unsigned long long)comps[c0].hash, uniq[u].bank, uniq[u].base, u);
+    }
+    if (!n_comps) fprintf(t, "    {0}\n");
+    fprintf(t, "};\nconst int recomp_chunk_count = %d;\n\n", n_comps);
     fprintf(t, "const RecompEntry recomp_entries[%d] = {\n", ne ? ne : 1);
     for (int i = 0; i < ne; i++) fprintf(t, "    {0x%06X, %u},\n", entries[i].key, entries[i].chunk);
     if (!ne) fprintf(t, "    {0}\n");
@@ -1106,10 +1221,15 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
     st->files = file_index + 2;
     st->c_bytes = bytes;
     say("  %d self-patching stores found", st->self_patched);
-    say("  %d chunks (%d entries with runtime-patched operands), %d entry points, %d instructions from %d of %d seeds; "
-        "%d C files, %.1f MB of C",
-        n_uniq, st->volatile_entries, ne, st->instructions, st->seeds_matched, st->seeds, st->files, (double)bytes / 1e6);
-    for (int u = 0; u < n_uniq; u++) free(uniq[u].ranges);
+    say("  %d chunks in %d independently checked components (%d entries with runtime-patched operands), "
+        "%d entry points, %d instructions from %d of %d seeds; %d C files, %.1f MB of C",
+        n_uniq, n_comps, st->volatile_entries, ne, st->instructions, st->seeds_matched, st->seeds, st->files,
+        (double)bytes / 1e6);
+    for (int u = 0; u < n_uniq; u++) { free(uniq[u].ranges); free(uniq[u].comp_of); }
+    for (int c0 = 0; c0 < n_comps; c0++) free(comps[c0].ranges);
+    free(comps);
+    comps = NULL;
+    n_comps = cap_comps = 0;
     free(uniq);
     free(entries);
     return true;

@@ -76,7 +76,7 @@ int main(int argc, char **argv)
     bool log_bios = false, log_all = false;
     const char *bios_reset = NULL, *wav_path = NULL, *seeds_path = NULL, *misses_path = NULL;
     int verify = 0;
-    bool no_native = false, use_script = false;
+    bool no_native = false, use_script = false, mute_cd = false;
     Press presses[64];
     int n_press = 0;
     for (int i = 2; i < argc; i++) {
@@ -93,6 +93,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--verify") && i + 1 < argc) verify = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-native")) no_native = true;
         else if (!strcmp(argv[i], "--script")) use_script = true;
+        else if (!strcmp(argv[i], "--mute-cd")) mute_cd = true;
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
             sscanf(argv[++i], "%ld:%ld", &trace_frame, &trace_left);
         }
@@ -142,6 +143,7 @@ int main(int argc, char **argv)
     }
     pce.log_bios = log_bios;
     pce.log_bios_all = log_all;
+    pce.mute_cdda = mute_cd;
     recomp_set_verify(verify);
     if (no_native || seeds_path) recomp_set_enabled(false);   /* seeds: record every entry point */
     if (seeds_path) recomp_load_misses(seeds_path);
@@ -204,6 +206,9 @@ int main(int argc, char **argv)
         if (seeds_path && recomp_write_misses(seeds_path)) printf("Seeds written to %s\n", seeds_path);
         if (misses_path && recomp_write_misses(misses_path)) printf("Misses written to %s\n", misses_path);
     }
+    printf("Sound: %llu PSG register writes; PSG audible for %.1f s, ADPCM for %.1f s\n",
+           (unsigned long long)pce.snd.psg_writes, (double)pce.snd.psg_samples / SND_RATE,
+           (double)pce.snd.adpcm_samples / SND_RATE);
     printf("\nBIOS calls:");
     for (int i = 0; i < PCE_BIOS_ENTRIES; i++)
         if (pce.bios_calls[i]) printf(" %s x%u", bios_entry_name(i), pce.bios_calls[i]);

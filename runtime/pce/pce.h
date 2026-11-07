@@ -7,6 +7,7 @@
 
 #include "cpu/huc6280.h"
 #include "disc.h"
+#include "sound.h"
 #include "video.h"
 
 #define PCE_MASTER_PER_LINE 1365
@@ -21,6 +22,7 @@ typedef struct Pce {
     HuC6280 cpu;
     Vdc vdc;
     Vce vce;
+    Sound snd;                  /* PSG + ADPCM */
     Disc disc;
 
     uint8_t *page[256];         /* physical 8 KiB pages; NULL = unmapped */
@@ -55,6 +57,10 @@ typedef struct Pce {
         int volume;             /* 0..256 */
         int fade_step;          /* volume change per output sample block, 0 = none */
     } cdda;
+    bool mute_cdda;             /* diagnostics: leave CD audio out of the mix */
+    uint16_t ad_last_start;     /* AD_PLAY parameters, reused when replaying */
+    uint16_t ad_last_len;
+    uint8_t ad_last_rate;
 
     uint64_t master;            /* master clock (21.477 MHz) */
     uint64_t frame;
