@@ -17,6 +17,7 @@ void settings_default(Settings *s)
     s->rewind = true;
     s->volume = 10;
     s->slot = 1;
+    s->start_screen = true;
     s->language = LANG_EN;
 }
 
@@ -55,6 +56,7 @@ void settings_load(Settings *s, const char *path)
         else if (!strcmp(key, "play_maria")) s->play_maria = n != 0;
         else if (!strcmp(key, "language")) s->language = clampi(n, 0, LANG_COUNT - 1);
         else if (!strcmp(key, "disc_ja")) snprintf(s->disc_ja, sizeof s->disc_ja, "%s", val);
+        else if (!strcmp(key, "start_screen")) s->start_screen = n != 0;
         else if (!strcmp(key, "disc_en")) snprintf(s->disc_en, sizeof s->disc_en, "%s", val);
     }
     fclose(f);
@@ -67,12 +69,12 @@ bool settings_save(const Settings *s, const char *path)
     fprintf(f,
             "# Rondo Recomp options (also changed from the in-game menu: F1 / Back)\n"
             "fullscreen = %d\nwidescreen = %d\naspect = %d\nscaling = %d\nfilter = %d\nsides = %d\n"
-            "skip_cinematics = %d\nrewind = %d\nvolume = %d\nslot = %d\n"
+            "skip_cinematics = %d\nrewind = %d\nvolume = %d\nslot = %d\nstart_screen = %d\n"
             "cheat_health = %d\ncheat_hearts = %d\ncheat_lives = %d\n"
             "maria_unlocked = %d\nplay_maria = %d\n"
             "language = %d\ndisc_ja = %s\ndisc_en = %s\n",
             s->fullscreen, s->widescreen, s->aspect, s->scaling, s->filter, s->sides,
-            s->skip, s->rewind, s->volume, s->slot,
+            s->skip, s->rewind, s->volume, s->slot, s->start_screen,
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
             s->maria_unlocked, s->play_maria,
             s->language, s->disc_ja, s->disc_en);

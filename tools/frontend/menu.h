@@ -1,5 +1,5 @@
-/* The in-game menu (F1 / Esc / the controller's Back button). The game is paused while it
- * is open. */
+/* The in-game menu (F1 / Esc / the controller's Back button; the game is paused while it is
+ * open) and the start screen shown before the game (the same pages, with Play at the top). */
 #pragma once
 
 #include <SDL3/SDL.h>
@@ -18,18 +18,31 @@ typedef enum {
     MENU_LANGUAGE,         /* settings.language changed: restart with the other disc */
     MENU_VIDEO_CHANGED,    /* fullscreen etc. */
     MENU_SETTINGS_CHANGED, /* anything else: save settings.ini */
+    MENU_PLAY,             /* start screen: start the game */
+    MENU_START_SCREEN,     /* in-game menu: back to the start screen */
+    MENU_SETUP,            /* start screen: open RondoRecomp Setup (add a disc, rebuild) */
 } MenuResult;
 
 typedef struct Menu {
     bool open;
     int page;
+    int root;              /* the page Back returns to: the in-game menu or the start screen */
     int sel[8];
     char status[160];      /* one line at the bottom (e.g. "State 3 saved") */
+    char info[2][64];      /* start screen: lines under the title (the disc, the languages) */
 } Menu;
 
 void menu_open(Menu *m);
+void menu_open_start_screen(Menu *m);
+bool menu_on_start_screen(const Menu *m);   /* open as the start screen (any of its pages) */
 MenuResult menu_nav(Menu *m, Settings *s, Nav nav);
 void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren);
+
+/* Mouse, in render coordinates: the item under (x, y) or -1; moving over an item selects
+ * it; clicking chooses it (a choice steps to its next value). */
+int menu_item_at(const Menu *m, SDL_Renderer *ren, float x, float y);
+void menu_hover(Menu *m, int item);
+MenuResult menu_click(Menu *m, Settings *s, int item);
 
 /* Test: draws every page with every value of every option, checking that each value reads
  * back and that changing an option leaves the rest of *s alone. Returns the number of

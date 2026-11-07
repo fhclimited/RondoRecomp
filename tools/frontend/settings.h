@@ -22,6 +22,7 @@ typedef struct Settings {
     int skip;              /* SKIP_*: story cinematics */
     bool rewind;
     int volume;            /* 0-10 */
+    bool start_screen;     /* show the start screen before the game (rondo.exe --play skips it once) */
     int slot;              /* save-state slot 1-9 */
     /* cheats */
     bool cheat_health, cheat_hearts, cheat_lives;

@@ -7,7 +7,7 @@
 
 #include "video.h"
 
-enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_COUNT };
+enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_START, PAGE_COUNT };
 
 typedef enum { IT_ACTION, IT_PAGE, IT_CHOICE, IT_TOGGLE, IT_TEXT, IT_BACK } ItemKind;
 
@@ -52,6 +52,19 @@ static const Item MAIN_ITEMS[] = {
     {IT_PAGE, "Controls", PAGE_CONTROLS, 0, NULL, 0, 0, 0},
     CHOICE("Language", language, LANGS, 0, MENU_LANGUAGE),
     {IT_ACTION, "Reset game", MENU_RESET, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Start screen", MENU_START_SCREEN, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Quit", MENU_QUIT, 0, NULL, 0, 0, 0},
+};
+static const Item START_ITEMS[] = {
+    {IT_ACTION, "Play", MENU_PLAY, 0, NULL, 0, 0, 0},
+    CHOICE("Language", language, LANGS, 0, MENU_LANGUAGE),
+    {IT_ACTION, "Load state", MENU_LOAD_STATE, 0, NULL, 0, 0, 0},
+    CHOICE("State slot", slot, SLOTS, 1, MENU_SETTINGS_CHANGED),
+    {IT_PAGE, "Video", PAGE_VIDEO, 0, NULL, 0, 0, 0},
+    {IT_PAGE, "Gameplay", PAGE_GAMEPLAY, 0, NULL, 0, 0, 0},
+    {IT_PAGE, "Cheats", PAGE_CHEATS, 0, NULL, 0, 0, 0},
+    {IT_PAGE, "Controls", PAGE_CONTROLS, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Setup (add a disc, rebuild)", MENU_SETUP, 0, NULL, 0, 0, 0},
     {IT_ACTION, "Quit", MENU_QUIT, 0, NULL, 0, 0, 0},
 };
 static const Item VIDEO_ITEMS[] = {
@@ -67,6 +80,7 @@ static const Item GAMEPLAY_ITEMS[] = {
     CHOICE("Skip cinematics", skip, SKIPS, 0, MENU_SETTINGS_CHANGED),
     TOGGLE("Rewind (hold LT / R)", rewind, MENU_SETTINGS_CHANGED),
     CHOICE("Volume", volume, VOLUMES, 0, MENU_SETTINGS_CHANGED),
+    TOGGLE("Start screen", start_screen, MENU_SETTINGS_CHANGED),
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 static const Item CHEAT_ITEMS[] = {
@@ -102,13 +116,22 @@ static const Item CONTROL_ITEMS[] = {
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 
-static const struct { const char *title; const Item *items; int n; int parent; } PAGES[PAGE_COUNT] = {
-    {"RONDO RECOMP", MAIN_ITEMS, (int)(sizeof MAIN_ITEMS / sizeof MAIN_ITEMS[0]), -1},
-    {"VIDEO", VIDEO_ITEMS, (int)(sizeof VIDEO_ITEMS / sizeof VIDEO_ITEMS[0]), PAGE_MAIN},
-    {"GAMEPLAY", GAMEPLAY_ITEMS, (int)(sizeof GAMEPLAY_ITEMS / sizeof GAMEPLAY_ITEMS[0]), PAGE_MAIN},
-    {"CHEATS", CHEAT_ITEMS, (int)(sizeof CHEAT_ITEMS / sizeof CHEAT_ITEMS[0]), PAGE_MAIN},
-    {"CONTROLS", CONTROL_ITEMS, (int)(sizeof CONTROL_ITEMS / sizeof CONTROL_ITEMS[0]), PAGE_MAIN},
+/* parent -1: a root (the in-game menu, the start screen); the option pages return to
+ * whichever root opened them */
+static const struct { const char *title, *subtitle; const Item *items; int n; int parent; } PAGES[PAGE_COUNT] = {
+    {"RONDO RECOMP", NULL, MAIN_ITEMS, (int)(sizeof MAIN_ITEMS / sizeof MAIN_ITEMS[0]), -1},
+    {"VIDEO", NULL, VIDEO_ITEMS, (int)(sizeof VIDEO_ITEMS / sizeof VIDEO_ITEMS[0]), PAGE_MAIN},
+    {"GAMEPLAY", NULL, GAMEPLAY_ITEMS, (int)(sizeof GAMEPLAY_ITEMS / sizeof GAMEPLAY_ITEMS[0]), PAGE_MAIN},
+    {"CHEATS", NULL, CHEAT_ITEMS, (int)(sizeof CHEAT_ITEMS / sizeof CHEAT_ITEMS[0]), PAGE_MAIN},
+    {"CONTROLS", NULL, CONTROL_ITEMS, (int)(sizeof CONTROL_ITEMS / sizeof CONTROL_ITEMS[0]), PAGE_MAIN},
+    {"RONDO RECOMP", "Castlevania: Rondo of Blood", START_ITEMS, (int)(sizeof START_ITEMS / sizeof START_ITEMS[0]), -1},
 };
+
+static int parent_of(const Menu *m, int page)
+{
+    int p = PAGES[page].parent;
+    return p == PAGE_MAIN ? m->root : p;
+}
 
 static int get_value(const Settings *s, const Item *it)
 {
@@ -138,10 +161,20 @@ static int first_selectable(int page)
 void menu_open(Menu *m)
 {
     m->open = true;
-    m->page = PAGE_MAIN;
+    m->page = m->root = PAGE_MAIN;
     m->sel[PAGE_MAIN] = 0;
     m->status[0] = 0;
 }
+
+void menu_open_start_screen(Menu *m)
+{
+    m->open = true;
+    m->page = m->root = PAGE_START;
+    m->sel[PAGE_START] = 0;
+    m->status[0] = 0;
+}
+
+bool menu_on_start_screen(const Menu *m) { return m->open && m->root == PAGE_START; }
 
 MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
 {
@@ -171,38 +204,90 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
         switch (it->kind) {
         case IT_ACTION: return (MenuResult)it->arg;
         case IT_PAGE: m->page = it->arg; m->sel[m->page] = first_selectable(m->page); return MENU_NOTHING;
-        case IT_BACK: m->page = PAGES[m->page].parent; return MENU_NOTHING;
+        case IT_BACK: m->page = parent_of(m, m->page); return MENU_NOTHING;
         case IT_CHOICE:
         case IT_TOGGLE: set_value(s, it, get_value(s, it) + 1); return it->on_change;
         default: return MENU_NOTHING;
         }
     case NAV_BACK:
-        if (PAGES[m->page].parent < 0) return MENU_CLOSE;
-        m->page = PAGES[m->page].parent;
+        if (PAGES[m->page].parent >= 0) m->page = parent_of(m, m->page);
+        else if (m->root != PAGE_START) return MENU_CLOSE;    /* the start screen stays */
         return MENU_NOTHING;
-    case NAV_MENU:
-        return MENU_CLOSE;
+    case NAV_MENU:            /* START / F1: on the start screen, play */
+        if (m->root != PAGE_START) return MENU_CLOSE;
+        if (m->page == PAGE_START) return MENU_PLAY;
+        m->page = PAGE_START;
+        return MENU_NOTHING;
     default:
         return MENU_NOTHING;
     }
 }
 
-void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
+typedef struct Layout {
+    int ww, wh, head;          /* window; lines between the title and the first item */
+    float k, ch, line, pw, ph;
+    SDL_FRect panel;
+    float first_y;             /* top of the first item's text */
+} Layout;
+
+static Layout layout(const Menu *m, SDL_Renderer *ren)
 {
-    int ww, wh;
-    SDL_GetRenderOutputSize(ren, &ww, &wh);
-    const Item *items = PAGES[m->page].items;
+    Layout L;
+    SDL_GetRenderOutputSize(ren, &L.ww, &L.wh);
     int n = PAGES[m->page].n;
     const int cols = 40;
+    L.head = 2;
+    if (PAGES[m->page].subtitle) {
+        L.head += 1;
+        for (int i = 0; i < 2; i++) L.head += m->info[i][0] != 0;
+        L.head += 1;
+    }
+    int rows = n + 4 + L.head;
     /* biggest whole scale at which the page fits in 95% of the window */
     int ks = ui_scale(ren);
-    while (ks > 1 && ((float)((n + 6) * 12 * ks) > (float)wh * 0.95f || (float)((cols + 4) * 8 * ks) > (float)ww * 0.95f)) ks--;
-    float k = (float)ks;
-    float ch = 8 * k, line = 12 * k;
+    while (ks > 1 && ((float)(rows * 12 * ks) > (float)L.wh * 0.95f || (float)((cols + 4) * 8 * ks) > (float)L.ww * 0.95f)) ks--;
+    L.k = (float)ks;
+    L.ch = 8 * L.k;
+    L.line = 12 * L.k;
+    L.pw = (cols + 4) * L.ch;
+    L.ph = (float)rows * L.line;
+    L.panel = (SDL_FRect){((float)L.ww - L.pw) / 2, ((float)L.wh - L.ph) / 2, L.pw, L.ph};
+    L.first_y = L.panel.y + L.line * (float)(1 + L.head);
+    return L;
+}
+
+int menu_item_at(const Menu *m, SDL_Renderer *ren, float x, float y)
+{
+    Layout L = layout(m, ren);
+    if (x < L.panel.x + L.ch || x >= L.panel.x + L.pw - L.ch) return -1;
+    float row = (y - (L.first_y - 2 * L.k)) / L.line;
+    if (row < 0) return -1;
+    int i = (int)row;
+    return i < PAGES[m->page].n && selectable(&PAGES[m->page].items[i]) ? i : -1;
+}
+
+void menu_hover(Menu *m, int item)
+{
+    if (item >= 0 && item < PAGES[m->page].n && selectable(&PAGES[m->page].items[item])) m->sel[m->page] = item;
+}
+
+MenuResult menu_click(Menu *m, Settings *s, int item)
+{
+    if (item < 0 || item >= PAGES[m->page].n || !selectable(&PAGES[m->page].items[item])) return MENU_NOTHING;
+    m->sel[m->page] = item;
+    return menu_nav(m, s, NAV_OK);
+}
+
+void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
+{
+    Layout L = layout(m, ren);
+    int ww = L.ww, wh = L.wh;
+    const Item *items = PAGES[m->page].items;
+    int n = PAGES[m->page].n;
+    float k = L.k, ch = L.ch, line = L.line, pw = L.pw, ph = L.ph;
+    SDL_FRect panel = L.panel;
 
     ui_box(ren, (SDL_FRect){0, 0, (float)ww, (float)wh}, (SDL_Color){0, 0, 0, 160});
-    float pw = (cols + 4) * ch, ph = (float)(n + 6) * line;
-    SDL_FRect panel = {((float)ww - pw) / 2, ((float)wh - ph) / 2, pw, ph};
     ui_box(ren, panel, (SDL_Color){16, 10, 24, 235});
     ui_box(ren, (SDL_FRect){panel.x, panel.y, pw, k * 2}, (SDL_Color){170, 30, 40, 255});
     ui_box(ren, (SDL_FRect){panel.x, panel.y + ph - k * 2, pw, k * 2}, (SDL_Color){170, 30, 40, 255});
@@ -212,6 +297,17 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
     float x = panel.x + 2 * ch, y = panel.y + line;
     const char *t = PAGES[m->page].title;
     ui_text(ren, panel.x + (pw - (float)strlen(t) * ch) / 2, y, k, title, t);
+    if (PAGES[m->page].subtitle) {
+        const char *st = PAGES[m->page].subtitle;
+        y += line;
+        ui_text(ren, panel.x + (pw - (float)strlen(st) * ch) / 2, y, k, dim, st);
+        for (int i = 0; i < 2; i++) {
+            if (!m->info[i][0]) continue;
+            y += line;
+            ui_text(ren, panel.x + (pw - (float)strlen(m->info[i]) * ch) / 2, y, k, val, m->info[i]);
+        }
+        y += line;
+    }
     y += line * 2;
 
     for (int i = 0; i < n; i++, y += line) {
@@ -233,7 +329,9 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
         }
     }
     y += line;
-    const char *hint = m->status[0] ? m->status : "A: choose   B: back   Left/Right: change";
+    const char *hint = m->status[0] ? m->status
+                       : m->page == PAGE_START ? "START: play   Left/Right: change"
+                                               : "A: choose   B: back   Left/Right: change";
     ui_text(ren, panel.x + (pw - (float)strlen(hint) * ch) / 2, y, k, m->status[0] ? hi : dim, hint);
 }
 

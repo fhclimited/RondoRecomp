@@ -1,8 +1,11 @@
-/* Windowed frontend (SDL3): video, input, audio, menu, save states, rewind, cheats.
+/* Windowed frontend (SDL3): start screen, video, input, audio, menu, save states, rewind,
+ * cheats.
  *
- * usage: rondo [game.cue] [--autotest] [--autotest-features DIR]
- *   With no disc argument it uses the remembered disc, then searches the folders around
- *   the executable, then asks once with a file picker and remembers the choice.
+ * usage: rondo [game.cue] [--play] [--autotest] [--autotest-features DIR] [--autotest-start]
+ *   With no disc argument it uses the disc Setup installed, then the remembered disc, then
+ *   searches the folders around the executable, then asks once with a file picker and
+ *   remembers the choice. It opens on the start screen (Play, language, options; the game's
+ *   attract mode runs behind it) unless --play is given or the option is off.
  *
  * Controls: see input.h (also on the menu's Controls page). F1 / Esc / the controller's
  * Back button open the menu; options are kept in settings.ini in the pref folder
@@ -242,6 +245,37 @@ static void switch_language(Session *ss, Settings *set, const char *main_disc, b
     set->language = ss->language;
 }
 
+/* The start screen's lines under the title: the disc being played, the other language. */
+static void start_screen_info(Menu *m, const Session *ss, const Settings *set, const char *main_disc)
+{
+    char other[1024];
+    int o = ss->language == LANG_JA ? LANG_EN : LANG_JA;
+    bool have = disc_for(o, set, main_disc, other, sizeof other);
+    snprintf(m->info[0], sizeof m->info[0], "%s disc - %s %s", ss->language == LANG_JA ? "Japanese" : "English",
+             o == LANG_JA ? "Japanese" : "English", have ? "also installed" : "not installed");
+    snprintf(m->info[1], sizeof m->info[1], "%s", recomp_build_id);
+}
+
+/* Start screen: RondoRecomp Setup (next to rondo.exe) adds a disc or rebuilds. */
+static bool open_setup(char *status, size_t n)
+{
+    const char *base = SDL_GetBasePath();
+    char exe[1100];
+    snprintf(exe, sizeof exe, "%sRondoRecomp Setup.exe", base ? base : "");
+    if (!SDL_GetPathInfo(exe, NULL)) {
+        snprintf(status, n, "RondoRecomp Setup.exe is not next to rondo.exe");
+        return false;
+    }
+    const char *args[] = {exe, NULL};
+    SDL_Process *proc = SDL_CreateProcess(args, false);
+    if (!proc) {
+        snprintf(status, n, "Cannot start Setup: %.80s", SDL_GetError());
+        return false;
+    }
+    SDL_DestroyProcess(proc);      /* it keeps running; rondo.exe quits so it can be rebuilt */
+    return true;
+}
+
 static void state_path(char *out, size_t n, const Session *ss, int slot)
 {
     snprintf(out, n, "%sstates/slot%d%s.state", pref_dir, slot, ss->language == LANG_JA ? "-ja" : "");
@@ -265,11 +299,13 @@ int main(int argc, char **argv)
     /* --autotest: save/load a state and rewind without user input, then quit.
      * --autotest-features DIR: play the capture script with cheats and automatic cinematic
      * skipping, take screenshots of the video modes and menu into DIR, then quit. */
-    bool autotest = false;
+    bool autotest = false, play_now = false, autotest_start = false;
     const char *features_dir = NULL, *disc_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autotest")) autotest = true;
+        else if (!strcmp(argv[i], "--play")) play_now = true;
         else if (!strcmp(argv[i], "--autotest-features") && i + 1 < argc) features_dir = argv[++i];
+        else if (!strcmp(argv[i], "--autotest-start")) autotest_start = true;
         else disc_arg = argv[i];
     }
     char autotest_log[2048] = "";
@@ -281,7 +317,7 @@ int main(int argc, char **argv)
     }
     char settings_path[1100], states_dir[1100];
     snprintf(settings_path, sizeof settings_path, "%ssettings.ini", pref_dir);
-    if (autotest || features_dir) {
+    if (autotest || features_dir || autotest_start) {
         /* test runs keep their state files apart from the player's */
         no_save_files = true;
         size_t l = strlen(pref_dir);
@@ -292,7 +328,7 @@ int main(int argc, char **argv)
     SDL_CreateDirectory(states_dir);
     Settings set;
     settings_load(&set, settings_path);
-    bool test_mode = autotest || features_dir;
+    bool test_mode = autotest || features_dir || autotest_start;
     if (test_mode) {   /* fixed options; nothing is saved */
         settings_default(&set);
         if (features_dir) {
@@ -352,11 +388,18 @@ int main(int argc, char **argv)
     Input in;
     input_init(&in);
     Menu menu = {0};
+    /* --autotest-start: the start screen for 600 frames, a mouse click on Play (a real event
+     * through the queue), 300 frames of the game, then quit */
+    int t_start_loops = 0;
+    if ((!test_mode && !play_now && set.start_screen) || autotest_start) {
+        menu_open_start_screen(&menu);
+        start_screen_info(&menu, &ss, &set, disc_path);
+    }
     const double frame_ns = 1e9 / FRAME_RATE;
     double audio_frac = 0.0;
     static int16_t samples[2048 * 2];
     Uint64 next = SDL_GetTicksNS();
-    bool running = true;
+    bool running = true, cursor_shown = true;
     bool was_rewinding = false, skipping = false, hold_input = false;
     int rewind_held_frames = 0;
     /* autotest bookkeeping */
@@ -367,15 +410,53 @@ int main(int argc, char **argv)
     int t_min_health = 0x100;
 
     while (running) {
+        if (autotest_start) {
+            t_start_loops++;
+            if (t_start_loops == 600) {
+                TLOG("autotest-start: start screen up for %d frames, game frame %llu, state %02X (attract runs behind)\n",
+                     t_start_loops - 1, (unsigned long long)pce.frame, pce.wram[RONDO_STATE]);
+                int ww, wh, item_y = -1;
+                SDL_GetRenderOutputSize(ren, &ww, &wh);
+                for (int y = 0; y < wh && item_y < 0; y++)
+                    if (menu_item_at(&menu, ren, (float)ww / 2, (float)y) == 0) item_y = y + 4;
+                float wx = 0, wy = 0;
+                SDL_RenderCoordinatesToWindow(ren, (float)ww / 2, (float)item_y, &wx, &wy);
+                SDL_Event click = {0};
+                click.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+                click.button.windowID = SDL_GetWindowID(win);
+                click.button.button = SDL_BUTTON_LEFT;
+                click.button.down = true;
+                click.button.clicks = 1;
+                click.button.x = wx;
+                click.button.y = wy;
+                SDL_PushEvent(&click);
+            } else if (t_start_loops == 900) {
+                TLOG("autotest-start: after clicking Play: %s, game frame %llu (from power-on), state %02X\n",
+                     menu.open ? "STILL ON THE START SCREEN" : "playing", (unsigned long long)pce.frame,
+                     pce.wram[RONDO_STATE]);
+                running = false;
+            }
+        }
         bool start_pressed = false;
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) { running = false; continue; }
             input_device_event(&in, &ev);
             if (menu.open) {
-                Nav nav = input_nav_event(&ev);
-                if (nav == NAV_NONE) continue;
-                MenuResult r = menu_nav(&menu, &set, nav);
+                MenuResult r = MENU_NOTHING;
+                if (ev.type == SDL_EVENT_MOUSE_MOTION || ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                    SDL_Event e = ev;
+                    SDL_ConvertEventToRenderCoordinates(ren, &e);
+                    bool motion = ev.type == SDL_EVENT_MOUSE_MOTION;
+                    int item = menu_item_at(&menu, ren, motion ? e.motion.x : e.button.x, motion ? e.motion.y : e.button.y);
+                    if (motion) menu_hover(&menu, item);
+                    else if (e.button.button == SDL_BUTTON_LEFT) r = menu_click(&menu, &set, item);
+                    else if (e.button.button == SDL_BUTTON_RIGHT) r = menu_nav(&menu, &set, NAV_BACK);
+                } else {
+                    Nav nav = input_nav_event(&ev);
+                    if (nav == NAV_NONE) continue;
+                    r = menu_nav(&menu, &set, nav);
+                }
                 switch (r) {
                 case MENU_CLOSE:
                     menu.open = false;
@@ -413,8 +494,30 @@ int main(int argc, char **argv)
                 case MENU_QUIT:
                     running = false;
                     break;
+                case MENU_PLAY:                /* start screen: the game from power-on */
+                    if (start_game(&ss, ss.disc, err, sizeof err)) {
+                        menu.open = false;
+                        hold_input = true;
+                        skipping = was_rewinding = false;
+                    } else {
+                        snprintf(menu.status, sizeof menu.status, "%.100s", err);
+                    }
+                    break;
+                case MENU_START_SCREEN:
+                    if (start_game(&ss, ss.disc, err, sizeof err)) {
+                        menu_open_start_screen(&menu);
+                        start_screen_info(&menu, &ss, &set, disc_path);
+                        skipping = was_rewinding = false;
+                    } else {
+                        snprintf(menu.status, sizeof menu.status, "%.100s", err);
+                    }
+                    break;
+                case MENU_SETUP:
+                    if (open_setup(menu.status, sizeof menu.status)) running = false;
+                    break;
                 case MENU_LANGUAGE:
                     switch_language(&ss, &set, disc_path, true, win, ren, menu.status, sizeof menu.status);
+                    if (menu_on_start_screen(&menu)) start_screen_info(&menu, &ss, &set, disc_path);
                     if (!test_mode) settings_save(&set, settings_path);
                     break;
                 case MENU_VIDEO_CHANGED:
@@ -469,8 +572,12 @@ int main(int argc, char **argv)
         if (menu.open) {
             Nav nav = input_nav_stick(&in);
             if (nav != NAV_NONE) {
-                MenuResult r = menu_nav(&menu, &set, nav);
-                if (r == MENU_SETTINGS_CHANGED || r == MENU_VIDEO_CHANGED) {
+                MenuResult r = menu_nav(&menu, &set, nav);    /* the stick only steps and changes values */
+                if (r == MENU_LANGUAGE) {
+                    switch_language(&ss, &set, disc_path, true, win, ren, menu.status, sizeof menu.status);
+                    if (menu_on_start_screen(&menu)) start_screen_info(&menu, &ss, &set, disc_path);
+                }
+                if (r == MENU_SETTINGS_CHANGED || r == MENU_VIDEO_CHANGED || r == MENU_LANGUAGE) {
                     if (r == MENU_VIDEO_CHANGED) SDL_SetWindowFullscreen(win, set.fullscreen);
                     if (!test_mode) settings_save(&set, settings_path);
                 }
@@ -485,7 +592,12 @@ int main(int argc, char **argv)
                             ? wide_extent((double)ww / (double)wh, video_picture_aspect(&video, &set)) : 0;
         }
         bool rewinding = false, ran_frame = false;
-        if (!menu.open) {
+        if (menu_on_start_screen(&menu)) {
+            /* behind the start screen: the game's own attract mode, untouched by input */
+            pce.pad = 0;
+            run_frame();
+            ran_frame = true;
+        } else if (!menu.open) {
             if (!skipping && game_in_cinematic(&pce) &&
                 (set.skip == SKIP_AUTO || (set.skip == SKIP_START && start_pressed))) {
                 skipping = true;
@@ -630,6 +742,34 @@ int main(int argc, char **argv)
                 snprintf(path, sizeof path, "%s/%s.bmp", features_dir, names[i]);
                 screenshot(ren, path);
             }
+            {   /* the start screen: a screenshot; START plays, Back stays, an option page returns
+                 * to it, and the mouse finds each item in order */
+                Menu sm = {0};
+                menu_open_start_screen(&sm);
+                start_screen_info(&sm, &ss, &set, disc_path);
+                video_draw(&video, &set);
+                menu_draw(&sm, &set, ren);
+                snprintf(path, sizeof path, "%s/start_screen.bmp", features_dir);
+                screenshot(ren, path);
+                MenuResult on_start = menu_nav(&sm, &set, NAV_MENU), on_back = menu_nav(&sm, &set, NAV_BACK);
+                int ww, wh, found = 0, last = -1;
+                SDL_GetRenderOutputSize(ren, &ww, &wh);
+                bool in_order = true;
+                for (int y = 0; y < wh; y++) {
+                    int it = menu_item_at(&sm, ren, (float)ww / 2, (float)y);
+                    if (it < 0 || it == last) continue;
+                    if (it != last + 1) in_order = false;
+                    last = it;
+                    found++;
+                }
+                menu_click(&sm, &set, 4);                        /* Video */
+                menu_nav(&sm, &set, NAV_BACK);
+                MenuResult after = menu_nav(&sm, &set, NAV_MENU);
+                TLOG("features: start screen: START %s, Back %s, %d items under the mouse%s, Video then Back %s\n",
+                     on_start == MENU_PLAY ? "plays" : "DOES NOT PLAY", on_back == MENU_NOTHING ? "stays" : "LEAVES",
+                     found, in_order ? " in order" : " OUT OF ORDER",
+                     after == MENU_PLAY ? "returns to it" : "DOES NOT RETURN");
+            }
             char merr[200];
             int mbad = menu_check(&set, ren, merr, sizeof merr);
             TLOG("features: menu check: %s%s\n", mbad ? "PROBLEM at " : "every value of every option ok",
@@ -645,6 +785,11 @@ int main(int argc, char **argv)
             screenshot(ren, path);
             TLOG("features: Stage 1 at frame %llu drawn %d px wider on each side (game changes %s)\n",
                  (unsigned long long)pce.frame, pce.vdc.fb_wide, wide.patched ? "in place" : "missing");
+        }
+        if (menu.open != cursor_shown) {           /* the mouse pointer only over menus */
+            cursor_shown = menu.open;
+            if (cursor_shown) SDL_ShowCursor();
+            else SDL_HideCursor();
         }
         video_draw(&video, &set);
         if (skipping) {

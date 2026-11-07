@@ -179,10 +179,20 @@ background map may be shared between layers (the Stage 0 carriage chase is drawn
 no changes: its scenery layers loop round the whole map). Areas beyond a room's walls are
 drawn black (`vdc.wide_x0/x1`). The sprite changes follow each frame's wide/4:3 choice.
 
-Test modes: `rondo.exe --autotest` (save, load, rewind) and `rondo.exe --autotest-features
+Start screen (`menu.c` page `PAGE_START`, the in-game menu's root swapped for one with Play
+at the top; the option pages return to whichever root opened them): shown when rondo.exe
+starts unless `--play` or the Start screen option is off. The game boots behind it and runs
+its attract mode with no input; Play restarts it from power-on, Load state loads into it.
+START / F1 plays, Back does nothing there. The mouse works on every menu page
+(`menu_item_at`, sharing the layout with `menu_draw`); the pointer is hidden while playing.
+
+Test modes: `rondo.exe --autotest` (save, load, rewind), `rondo.exe --autotest-features
 DIR` (plays the capture script with automatic skipping and all cheats, uncapped; writes
-screenshots of the video modes and menu pages to DIR). Both log to `rondo.log` and keep
-their files in a `test` folder, never touching the player's saves.
+screenshots of the video modes, menu pages and start screen to DIR; checks the start
+screen's keys and mouse layout; switches language at the end) and `rondo.exe
+--autotest-start` (the start screen for 600 frames with the attract mode behind it, a mouse
+click on Play sent through the event queue, 300 frames of play). All log to `rondo.log` and
+keep their files in a `test` folder, never touching the player's saves.
 The build copies `SDL3.dll` and `libiconv-2.dll` next to the executable.
 
 ### Headless runner

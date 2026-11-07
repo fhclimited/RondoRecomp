@@ -48,10 +48,19 @@ Run is Richter's run from Symphony of the Night: hold LB while walking to go abo
 times as fast (his run there is 2.3 pixels a frame against a 1.25 walk; Rondo's walk is the
 same 1.25). Jumps started while running keep the speed. Maria runs too.
 
+Start screen
+------------
+rondo.exe opens on a start screen, with the game's own attract mode running behind it:
+Play (START, Enter, A, or a click), the language, loading a save state, the option pages
+below, Setup (to add the other language's disc or rebuild; rondo.exe closes so Setup can
+rebuild it) and Quit. Controller, keyboard and mouse all work. Menu, Start screen comes
+back to it. Gameplay, Start screen: Off goes straight into the game (rondo.exe --play
+does that once).
+
 Menu
 ----
 F1, Esc or the controller's Back button pauses the game and opens the menu: save and load
-states, choose the slot, reset, quit, and:
+states, choose the slot, reset, back to the start screen, quit, and:
 
 Video      Fullscreen (uses the screen's own resolution, e.g. 4K)
            Widescreen: More of the level, or Off (4:3); see below
@@ -63,7 +72,7 @@ Video      Fullscreen (uses the screen's own resolution, e.g. 4K)
            copy of it, or black
 Gameplay   Skip cinematics: press START during a story scene to skip it, or skip them
            automatically, or never
-           Rewind on/off, volume
+           Rewind on/off, volume, Start screen on/off
 Cheats     Infinite health, infinite hearts (always 99), infinite lives
            Maria unlocked: the game offers Maria as it does after you rescue her in Stage 2
            (and your save keeps it)
