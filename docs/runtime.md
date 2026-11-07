@@ -194,9 +194,18 @@ band's background has come in clear of the picture's left edge (at 21:9 the pict
 
 Start screen (`menu.c` page `PAGE_START`, the in-game menu's root swapped for one with Play
 at the top; the option pages return to whichever root opened them): shown when rondo.exe
-starts unless `--play` or the Start screen option is off. The game boots behind it and runs
-its attract mode with no input; Play restarts it from power-on and fast-forwards to the
+starts unless `--play` or the Start screen option is off. The game is loaded but does not
+run behind it (no picture, no sound); Play starts it from power-on and fast-forwards to the
 title screen (unless Skip cinematics is Never), Load state loads into it.
+
+The look (`theme.c`, after the Metroid: Other M port's visor menus in Castlevania's
+colours): dark glass panels with cut corners, gold lines with a glow, crimson accents, scan
+lines and a sweep line; a cross in turning rings as the emblem; the start screen's backdrop
+and title beside its menu panel; a help line per item and the buttons in the footer; panels
+sized to their rows and opening out when shown. All drawn with SDL's renderer
+(`SDL_RenderGeometry`); text in Windows' fonts (Bahnschrift, Palatino Linotype; Segoe UI,
+Georgia or Times New Roman instead) rasterised by stb_truetype (`stb_truetype.h`, public
+domain) into glyph atlases per size, or SDL's debug font if none is found.
 Cinematic skipping (START, or automatic) covers the story scenes (state `$0A`) and the
 power-on intro (state `$02`, sub-states `$00`-`$01`: the narration and animated opening, about
 1:55 on both discs, during which the game itself ignores START); the intro is run with no
@@ -208,8 +217,9 @@ Test modes: `rondo.exe --autotest` (save, load, rewind), `rondo.exe --autotest-f
 DIR` (plays the capture script with automatic skipping and all cheats, uncapped; writes
 screenshots of the video modes, menu pages and start screen to DIR; checks the start
 screen's keys and mouse layout; switches language at the end) and `rondo.exe
---autotest-start` (the start screen for 600 frames with the attract mode behind it, a mouse
-click on Play sent through the event queue, 300 frames of play). All log to `rondo.log` and
+--autotest-start` (the start screen for 600 frames, checking the game waits behind it, a
+mouse click on Play sent through the event queue, the title screen reached; then START
+pressed during the intro skipping it). All log to `rondo.log` and
 keep their files in a `test` folder, never touching the player's saves. Their window
 cannot take the keyboard focus, and they ignore real keyboard, mouse and controller input
 (events and polled state alike): only the input events a test sends itself, marked with

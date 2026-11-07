@@ -4,8 +4,8 @@
  * usage: rondo [game.cue] [--play] [--autotest] [--autotest-features DIR] [--autotest-start]
  *   With no disc argument it uses the disc Setup installed, then the remembered disc, then
  *   searches the folders around the executable, then asks once with a file picker and
- *   remembers the choice. It opens on the start screen (Play, language, options; the game's
- *   attract mode runs behind it) unless --play is given or the option is off.
+ *   remembers the choice. It opens on the start screen (Play, language, options; the game
+ *   waits until Play) unless --play is given or the option is off.
  *
  * Controls: see input.h (also on the menu's Controls page). F1 / Esc / the controller's
  * Back button open the menu; options are kept in settings.ini in the pref folder
@@ -27,6 +27,7 @@
 #include "pce/state.h"
 #include "recomp/recomp.h"
 #include "settings.h"
+#include "theme.h"
 #include "video.h"
 #include "wide.h"
 
@@ -47,16 +48,18 @@ static void show_osd(const char *fmt, ...)
     osd_until = SDL_GetTicks() + 2500;
 }
 
-/* A one-line banner: top left, or bottom right. */
+/* A one-line notice on a small glass plate (theme.h): top centre (clear of the HUD on the
+ * left), or bottom right. */
 static void draw_banner(SDL_Renderer *ren, const char *text, bool bottom_right)
 {
     int ww, wh;
     SDL_GetRenderOutputSize(ren, &ww, &wh);
-    float k = (float)ui_scale(ren);
-    float w = (8.0f * (float)strlen(text) + 8) * k, h = 16 * k;
-    float x = bottom_right ? (float)ww - w - 4 * k : 4 * k, y = bottom_right ? (float)wh - h - 4 * k : 4 * k;
-    ui_box(ren, (SDL_FRect){x, y, w, h}, (SDL_Color){0, 0, 0, 170});
-    ui_text(ren, x + 4 * k, y + 4 * k, k, (SDL_Color){255, 230, 160, 255}, text);
+    float u = th_unit(ww, wh), px = 15 * u, track = 1.5f * u;
+    float w = th_measure(ren, TH_FONT_UI, px, text, track) + 44 * u, h = 30 * u, m = 14 * u;
+    float x = bottom_right ? (float)ww - w - m : ((float)ww - w) * 0.5f, y = bottom_right ? (float)wh - h - m : m;
+    th_panel(ren, x, y, x + w, y + h, 9 * u, TH_PANEL_TOP, TH_PANEL_BOTTOM, th_alpha(TH_GOLD, 190), 1.3f * u);
+    th_rect(ren, x + 8 * u, y + 8 * u, x + 11 * u, y + h - 8 * u, TH_CRIMSON);
+    th_text(ren, TH_FONT_UI, px, x + 22 * u, y + h * 0.5f, TH_TEXT, text, 0, 0.5f, track, TH_NONE);
 }
 
 /* ---- choosing the disc image ------------------------------------------------------- */
@@ -435,14 +438,12 @@ int main(int argc, char **argv)
             int since = t_start_loops - t_phase_at;
             bool title = pce.wram[RONDO_STATE] == RONDO_OPENING && pce.wram[RONDO_SUB] >= 2;
             if (t_phase == 0 && t_start_loops == 600) {
-                TLOG("autotest-start: start screen up for %d frames, game frame %llu, state %02X (attract runs behind)\n",
-                     t_start_loops - 1, (unsigned long long)pce.frame, pce.wram[RONDO_STATE]);
-                int ww, wh, item_y = -1;
-                SDL_GetRenderOutputSize(ren, &ww, &wh);
-                for (int y = 0; y < wh && item_y < 0; y++)
-                    if (menu_item_at(&menu, ren, (float)ww / 2, (float)y) == 0) item_y = y + 4;
-                float wx = 0, wy = 0;
-                SDL_RenderCoordinatesToWindow(ren, (float)ww / 2, (float)item_y, &wx, &wy);
+                TLOG("autotest-start: start screen up for %d frames, game frame %llu (%s)\n", t_start_loops - 1,
+                     (unsigned long long)pce.frame,
+                     pce.frame == 0 ? "the game waits for Play" : "THE GAME RAN BEHIND IT");
+                float px = 0, py = 0, wx = 0, wy = 0;
+                menu_item_center(&menu, ren, 0, &px, &py);             /* Play */
+                SDL_RenderCoordinatesToWindow(ren, px, py, &wx, &wy);
                 SDL_Event click = {0};
                 click.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
                 click.button.windowID = SDL_GetWindowID(win);
@@ -549,8 +550,8 @@ int main(int argc, char **argv)
                         menu.open = false;
                         hold_input = true;
                         skipping = was_rewinding = false;
-                        /* the intro played behind the start screen: on to the title screen,
-                         * unless story scenes are never skipped */
+                        /* Play was the player's start: on to the title screen, unless story
+                         * scenes are never skipped */
                         skip_to_title = set.skip != SKIP_OFF;
                     } else {
                         snprintf(menu.status, sizeof menu.status, "%.100s", err);
@@ -646,10 +647,7 @@ int main(int argc, char **argv)
         }
         bool rewinding = false, ran_frame = false;
         if (menu_on_start_screen(&menu)) {
-            /* behind the start screen: the game's own attract mode, untouched by input */
-            pce.pad = 0;
-            run_frame();
-            ran_frame = true;
+            /* the start screen: the game waits for Play (nothing runs, nothing sounds) */
         } else if (!menu.open) {
             /* Play on the start screen goes on to the title screen: from power-on (the logo,
              * state $00) through the intro */
@@ -797,6 +795,7 @@ int main(int argc, char **argv)
             set = keep;
             Menu m = {0};
             menu_open(&m);
+            m.opened_ms = 0;                   /* shown fully open */
             const char *names[] = {"menu_main", "menu_video", "menu_controls"};
             for (int i = 0; i < 3; i++) {
                 if (i == 1) { for (int d = 0; d < 4; d++) menu_nav(&m, &set, NAV_DOWN); menu_nav(&m, &set, NAV_OK); }
@@ -806,10 +805,17 @@ int main(int argc, char **argv)
                 snprintf(path, sizeof path, "%s/%s.bmp", features_dir, names[i]);
                 screenshot(ren, path);
             }
+            /* the notices (top left; START: skip, bottom right) */
+            video_draw(&video, &set);
+            draw_banner(ren, "State 1 saved", false);
+            draw_banner(ren, "START: skip", true);
+            snprintf(path, sizeof path, "%s/notices.bmp", features_dir);
+            screenshot(ren, path);
             {   /* the start screen: a screenshot; START plays, Back stays, an option page returns
                  * to it, and the mouse finds each item in order */
                 Menu sm = {0};
                 menu_open_start_screen(&sm);
+                sm.opened_ms = 0;
                 start_screen_info(&sm, &ss, &set, disc_path);
                 video_draw(&video, &set);
                 menu_draw(&sm, &set, ren);
@@ -819,8 +825,10 @@ int main(int argc, char **argv)
                 int ww, wh, found = 0, last = -1;
                 SDL_GetRenderOutputSize(ren, &ww, &wh);
                 bool in_order = true;
+                float col_x = 0, col_y = 0;
+                menu_item_center(&sm, ren, 0, &col_x, &col_y);        /* down the panel's middle */
                 for (int y = 0; y < wh; y++) {
-                    int it = menu_item_at(&sm, ren, (float)ww / 2, (float)y);
+                    int it = menu_item_at(&sm, ren, col_x, (float)y);
                     if (it < 0 || it == last) continue;
                     if (it != last + 1) in_order = false;
                     last = it;
@@ -855,7 +863,7 @@ int main(int argc, char **argv)
             if (cursor_shown) SDL_ShowCursor();
             else SDL_HideCursor();
         }
-        video_draw(&video, &set);
+        if (!menu_on_start_screen(&menu)) video_draw(&video, &set);   /* the start screen draws it all */
         if (skipping) {
             draw_banner(ren, skip_intro ? "Skipping the intro..." : "Skipping cinematic...", false);
         } else if (rewinding) {

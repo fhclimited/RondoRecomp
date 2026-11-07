@@ -57,7 +57,7 @@ find_path(SDL3_INCLUDE_DIR SDL3/SDL.h HINTS "${_cc_prefix}/include")
 find_library(SDL3_LIBRARY NAMES SDL3 HINTS "${_cc_prefix}/lib")
 if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
   add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c tools/frontend/game.c tools/frontend/wide.c
-    tools/frontend/input.c tools/frontend/menu.c tools/frontend/settings.c tools/frontend/video.c
+    tools/frontend/input.c tools/frontend/menu.c tools/frontend/settings.c tools/frontend/video.c tools/frontend/theme.c
     runtime/recomp/recomp_none.c)
   target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR} tools/recomp)
   target_link_libraries(rondo PRIVATE pce ${SDL3_LIBRARY})

@@ -30,6 +30,7 @@ typedef struct Menu {
     int sel[8];
     char status[160];      /* one line at the bottom (e.g. "State 3 saved") */
     char info[2][64];      /* start screen: lines under the title (the disc, the languages) */
+    Uint64 opened_ms;      /* when it opened: the panel opens out */
 } Menu;
 
 void menu_open(Menu *m);
@@ -43,6 +44,8 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren);
 int menu_item_at(const Menu *m, SDL_Renderer *ren, float x, float y);
 void menu_hover(Menu *m, int item);
 MenuResult menu_click(Menu *m, Settings *s, int item);
+/* The middle of an item's row, in render coordinates (for tests that click it). */
+bool menu_item_center(const Menu *m, SDL_Renderer *ren, int item, float *x, float *y);
 
 /* Test: draws every page with every value of every option, checking that each value reads
  * back and that changing an option leaves the rest of *s alone. Returns the number of
