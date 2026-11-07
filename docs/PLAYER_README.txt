@@ -27,6 +27,7 @@ Attack        X                     Z
 Sub-weapon    B                     C
 Item Crash    Y                     V
 Backflip      RB                    A
+Run           hold LB               hold S
 Pause         Start                 Enter
 Menu          Back / View           F1 or Esc
 Rewind        hold LT               hold R
@@ -39,24 +40,44 @@ Sub-weapon presses Up + Attack for you, Item Crash is the original SELECT button
 Backflip presses Jump twice quickly (as Maria it gives her double jump). The original
 inputs (Up + Attack, Jump twice) work as well.
 
+Run is Richter's run from Symphony of the Night: hold LB while walking to go about 1.8
+times as fast (his run there is 2.3 pixels a frame against a 1.25 walk; Rondo's walk is the
+same 1.25). Jumps started while running keep the speed. Maria runs too.
+
 Menu
 ----
 F1, Esc or the controller's Back button pauses the game and opens the menu: save and load
 states, choose the slot, reset, quit, and:
 
 Video      Fullscreen (uses the screen's own resolution, e.g. 4K)
+           Widescreen: More of the level, or Off (4:3); see below
            Aspect ratio: 4:3 (as on a TV), square pixels, or stretched to fill the screen
-           Integer scaling: whole-number zoom only
+           Size: Fit screen (as big as the screen allows), or Whole multiples (every game
+           pixel the same size; leaves a border)
            Filter: Sharp (crisp, even pixels), Nearest, or Smooth
-           Wide-screen sides: on 16:9 and ultrawide screens the space beside the 4:3 picture
-           shows a blurred copy of the picture, or black
+           Beside the picture: when the picture is narrower than the screen, a blurred
+           copy of it, or black
 Gameplay   Skip cinematics: press START during a story scene to skip it, or skip them
            automatically, or never
            Rewind on/off, volume
 Cheats     Infinite health, infinite hearts (always 99), infinite lives
+           Maria unlocked: the game offers Maria as it does after you rescue her in Stage 2
+           (and your save keeps it)
+           Play as Maria: every stage is played as Maria, the Prologue too (starts from the
+           next stage you enter)
 Language   English or Japanese (needs your Japanese disc image too; see below)
 
 Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini.
+
+Widescreen
+----------
+On 16:9 and ultrawide screens the game draws more of the level on both sides: the
+background, enemies (they appear and move further out, where they are in the level) and
+items, with the score display moved to the left edge. Up to 21:9 (about 112 extra game
+pixels each side) is covered; wider screens get the rest beside the picture.
+Rooms the camera does not scroll through sideways (vertical shafts, boss rooms) keep the
+original 4:3 picture, as do cinematics and menus. Beyond the walls of a room is black.
+Turning widescreen on takes effect from the next room.
 
 Rewind plays the game backwards while held (faster after 3 seconds) and continues from
 where you let go; up to 30 minutes are kept. Rewinding never changes your saved game.

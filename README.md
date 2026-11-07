@@ -31,7 +31,10 @@ Findings so far: [docs/findings.md](docs/findings.md).
 - An in-game menu (F1 / Back): video modes for 4K, 16:9 and ultrawide screens (4:3 with
   blurred sides, square pixels, stretch, integer scaling, sharp filtering), cinematic
   skipping, cheats (infinite health, hearts, lives), modern controller layout with
-  sub-weapon / Item Crash / backflip buttons, and a Japanese option (with your Japanese disc). See [docs/runtime.md](docs/runtime.md).
+  sub-weapon / Item Crash / backflip buttons, and a Japanese option (with your Japanese disc).
+- Widescreen that shows more of the level (enemies included) on 16:9 and 21:9 screens,
+  Richter's run from Symphony of the Night (hold LB), and Maria cheats (unlocked; play as her
+  from the Prologue on). See [docs/runtime.md](docs/runtime.md).
 
 ## For players
 

@@ -121,6 +121,39 @@ Addresses are offsets in work RAM (bank $F8; $2000+ in the game's address space)
 - Input: presses shorter than 3 frames are ignored; a second I press 2-8 frames after the
   first one ends makes Richter backflip.
 
+## Characters, save record, player movement
+
+| Where | Meaning |
+|---|---|
+| zp $9F | character: 0 Richter, 1 Maria. Each stage loads that character's code; the area number has it in bit 0 (Stage 0 is $0A / $0B) |
+| $1F40-$1F56 | the current game's save record (copied to backup RAM on saving): $1F40 bit 0 lets the player change to Maria (not offered in the Prologue); $1F41-$1F42 a BCD counter; $1F43-$1F4C areas visited, $1F4D-$1F56 areas cleared (bit per area, one half per character) |
+| $0D80 / $0DD8 | player (object slot 0) X velocity, high / low, 8.8 pixels a frame |
+| $0AC0 | player facing (0 right, 1 left) |
+| $0F90 | player animation frame timer (counts down to the next frame) |
+
+Richter walks at $0140 (1.25 px a frame), jumps at $0150, Maria walks and jumps at $0160. The
+walking speed is set once as a walk starts (a two-entry table by facing in Richter's code).
+Forcing $9F = 1 before Stage 0 loads plays the Prologue as Maria.
+
+## Camera, scrolling and objects (widescreen)
+
+- Scroll layers at $1E00+ (8 layers): X sub/low/high $1E00/$1E08/$1E10, Y $1E18/$1E20/$1E28,
+  velocities $1E6E-$1E86, map page counters $1E8E/$1E96, per-frame copies at $1E39+ for the
+  raster split. Layer 0 is the playfield camera; the camera's limits are $1EBE (left page) and
+  $1EC6/$1EC7 (right X). The camera follows the player to keep it at screen X 128.
+- The level is a grid of 256-pixel screens ($1D00 table, 16 x 16 pages); the background map
+  is 512 x 512 (MWR $50). The scroll code streams 32-pixel columns 64 px past the edge it moves
+  towards, reading that distance from a small table also used for vertical streaming.
+- Objects: 88 slots in parallel arrays at $2A10-$3A38 (+$2000 in CPU space); positions are in
+  screen coordinates and are shifted by the camera every frame. Objects spawn from a per-room
+  list sorted by world X when within 64 px of the screen, are removed beyond 128 px, and (for
+  some) only move within 64 px. Slot $57 is the HUD. Some enemy generators sit fixed to the
+  screen at X 320 (Stage 1's skeletons).
+- The sprite builder writes up to 64 sprites straight to the VDC and drops any piece whose X is
+  outside the 256-pixel screen.
+- The Stage 0 carriage chase does not scroll the camera; its scenery layers loop round the
+  whole 512-pixel map, part of which is shared between layers.
+
 ## Open questions
 
 - [ ] Role of track 22 / second `CD_BASE` (error-retry mirror?) and which track carries the translation

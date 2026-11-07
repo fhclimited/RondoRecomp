@@ -120,6 +120,7 @@ build/rondo.exe "<path>/game.cue"
 | Sub-weapon | B (East) | C | Up + II (macro) |
 | Item Crash | Y (North) | V | SELECT |
 | Backflip | RB | A | I, release, I (macro) |
+| Run (hold) | LB | S | (frontend: speeds the walk up, `game_apply_run`) |
 | Pause | Start | Enter | RUN |
 | Menu | Back | F1 / Esc | (frontend) |
 | Rewind (hold) | LT | R | (frontend) |
@@ -132,9 +133,10 @@ ends works, 14 is too late; measured with `rondo_headless --press`).
 
 Modules: `input.c` (mapping, macros, menu navigation), `menu.c` (pages, persisted to
 `settings.ini` by `settings.c`), `video.c` (placement and filtering), `game.c` (what the
-frontend knows about the game: main state, cheats; also linked into `rondo_headless`).
+frontend knows about the game: main state, cheats, run), `wide.c` (widescreen); the last two
+are also linked into `rondo_headless`.
 
-Video: aspect 4:3 / square pixels / stretch, optional integer scaling, filters Sharp (nearest
+Video: aspect 4:3 / square pixels / stretch, fit or whole multiples, filters Sharp (nearest
 upscale to a whole factor into a render target, then linear to the final size), Nearest and
 Smooth. On wide screens the sides show the picture blurred (downscaled to 16x14, scaled up
 linearly, dimmed). The window is high-DPI aware, so fullscreen renders at the display's
@@ -147,6 +149,31 @@ Stage 0 scene takes under a second), then records one rewind step across the who
 Cheats (`game.c`): health losses are undone while playing (state `$05`); hearts are kept at
 99 while playing, unless they drop more than 12 times a second (a tally), then left alone
 until 3 quiet seconds pass or the state changes; lives losses are undone outside the menus.
+Maria unlocked sets bit 0 of `$1F40` (the current save record) while playing; Play as Maria
+sets the character byte `$9F` to 1 whenever a stage may be loading (outside gameplay and
+while a stage sets up), so every stage loads Maria's code, the Prologue included.
+
+Run (`game_apply_run`): Rondo sets the player's X velocity once when a walk starts (±$0140
+for Richter, ±$0160 for Maria; Richter's jumps ±$0150). While the run button is held, those
+exact values in the facing direction are scaled by 2.3 / 1.25 (SotN's run against its walk,
+which equals Rondo's), and the walk animation's frame timer gets an extra step on 5 frames
+of 6. The game's own movement code then handles walls, stairs and the camera.
+
+Widescreen (`wide.c`, `runtime/pce/video.c`): the VDC renders `vdc.wide` extra pixels on
+each side of a 256-pixel picture (background from the 512-pixel map, sprites with 10-bit X
+past 512 read as negative); `video.c` keeps the 4:3 pixel shape for the wider picture. The
+game is changed by byte patches, each checked against the original bytes (code is loaded
+from the disc as the game goes): background columns are streamed 112 px out instead of 64
+(and drawn at both distances, because some layers start drawn to 64 only), the room start
+draws all 16 columns, rows drawn while scrolling vertically cover the whole map, objects
+spawn 128 px out instead of 64, keep moving to 128 px and are removed past 192 px, and the
+sprite builder lets pieces through from -112 to 256 + 112. Generators fixed to the screen at
+the old spawn edge are moved to the new one; the HUD object moves to the left edge. The
+world changes are decided as each room starts (a dispatch hook on the room-start routines):
+on for rooms whose camera limits allow sideways scrolling, off for all others, whose
+background map may be shared between layers (the Stage 0 carriage chase is drawn wide with
+no changes: its scenery layers loop round the whole map). Areas beyond a room's walls are
+drawn black (`vdc.wide_x0/x1`). The sprite changes follow each frame's wide/4:3 choice.
 
 Test modes: `rondo.exe --autotest` (save, load, rewind) and `rondo.exe --autotest-features
 DIR` (plays the capture script with automatic skipping and all cheats, uncapped; writes
@@ -166,7 +193,13 @@ Investigation options: `--script` (the capture input script), `--ram 30,94,98` (
 work-RAM bytes whenever one changes), `--poke ADDR=VAL` (write before every frame),
 `--save-state FRAME:FILE` / `--load-state FILE` (start later runs mid-game), `--dump-ram
 FRAME:FILE`, `--ram-trace FILE` (work RAM + pad after every frame, for offline searches),
-`--cheats health,hearts,lives` and `--skip-cinematics` (the frontend's `game.c`). Button
+`--cheats health,hearts,lives,maria,play-maria` and `--skip-cinematics` (the frontend's
+`game.c`), `--run FRAME:LEN` (hold the run button), `--wide N` (widescreen, N pixels a side),
+`--wide-report FRAME` (which widescreen patches are in), `--write-watch ADDR,...` (which
+instruction changes those work-RAM bytes; interpreter), `--vram-watch LO:HI` (which
+instructions write that VRAM range), `--dump-mem FRAME:FILE` (all 256 banks + MPRs, for
+disassembly), `--dump-vram FRAME:FILE`, `--dump-sat FRAME` (sprite table), `--scroll-log FILE`
+(scroll registers mid-screen per frame). Button
 names for `--press` are lower case: `i`, `ii`, `select`, `run`, `up`, `down`, `left`, `right`.
 
 The interpreter runs at about 2,600 frames per second (~43× real time).
