@@ -160,6 +160,16 @@ int main(int argc, char **argv)
         SDL_Quit();
         return 1;
     }
+    /* entry points that run on the interpreter are kept next to rondo.exe; running Setup with
+     * --rebuild recompiles them too */
+    char misses_path[1024] = "";
+    {
+        const char *base = SDL_GetBasePath();
+        if (base) {
+            snprintf(misses_path, sizeof misses_path, "%smisses.txt", base);
+            recomp_load_misses(misses_path);
+        }
+    }
     /* save data (backup RAM) lives in the user's pref folder */
     char save_path[1024] = "";
     {
@@ -257,6 +267,26 @@ int main(int argc, char **argv)
         else if (now - next > (Uint64)(frame_ns * 5)) next = now;   /* fell behind: resync */
     }
 
+    if (misses_path[0] && recomp_stats()->miss_entries) recomp_write_misses(misses_path);
+    /* rondo.log next to the executable: what ran natively this session */
+    {
+        const char *base = SDL_GetBasePath();
+        char log_path[1024];
+        if (base) {
+            snprintf(log_path, sizeof log_path, "%srondo.log", base);
+            FILE *lf = fopen(log_path, "w");
+            if (lf) {
+                const RecompStats *rs = recomp_stats();
+                uint64_t tot = rs->native_cycles + rs->interp_cycles;
+                fprintf(lf, "build: %s\nframes: %llu\nrecompiled chunks: %d, entry points: %d\n"
+                            "CPU cycles native: %.2f%%\nchunk calls: %llu\nentry points without native code: %u\n",
+                        recomp_build_id, (unsigned long long)pce.frame, recomp_chunk_count, recomp_entry_count,
+                        tot ? 100.0 * (double)rs->native_cycles / (double)tot : 0.0,
+                        (unsigned long long)rs->calls, rs->miss_entries);
+                fclose(lf);
+            }
+        }
+    }
     if (audio) SDL_DestroyAudioStream(audio);
     SDL_Quit();
     return 0;
