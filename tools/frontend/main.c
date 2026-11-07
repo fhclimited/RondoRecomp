@@ -1,6 +1,8 @@
 /* Windowed frontend (SDL3): video, keyboard/gamepad input, CD audio.
  *
- * usage: rondo <game.cue>
+ * usage: rondo [game.cue]
+ *   With no argument it uses the remembered disc, then searches the folders around
+ *   the executable, then asks once with a file picker and remembers the choice.
  *
  * Keyboard: arrows = d-pad, X = I, Z = II, Enter = RUN, Right Shift / Backspace = SELECT,
  *           F11 = fullscreen, Esc = quit.
@@ -11,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "locate.h"
 #include "pce/pce.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
@@ -52,20 +55,82 @@ static uint8_t read_input(SDL_Gamepad **pads, int n_pads)
     return m;
 }
 
+/* ---- choosing the disc image ------------------------------------------------- */
+
+typedef struct {
+    SDL_AtomicInt done;
+    char path[1024];
+} Pick;
+
+static void SDLCALL on_pick(void *userdata, const char *const *files, int filter)
+{
+    (void)filter;
+    Pick *p = userdata;
+    if (files && files[0]) snprintf(p->path, sizeof p->path, "%s", files[0]);
+    else p->path[0] = 0;
+    SDL_SetAtomicInt(&p->done, 1);
+}
+
+static bool pick_file(SDL_Window *win, SDL_Renderer *ren, char *out, size_t n)
+{
+    static Pick pick;
+    static const SDL_DialogFileFilter filters[] = {{"PC Engine CD image (*.cue)", "cue"}};
+    SDL_SetAtomicInt(&pick.done, 0);
+    pick.path[0] = 0;
+    SDL_ShowOpenFileDialog(on_pick, &pick, win, filters, 1, NULL, false);
+    while (!SDL_GetAtomicInt(&pick.done)) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev))
+            if (ev.type == SDL_EVENT_QUIT) return false;
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+        SDL_RenderClear(ren);
+        SDL_RenderPresent(ren);
+        SDL_Delay(16);
+    }
+    if (!pick.path[0]) return false;
+    snprintf(out, n, "%s", pick.path);
+    return true;
+}
+
+/* Command line, then the remembered path, then a search near the executable, then ask. */
+static bool choose_disc(SDL_Window *win, SDL_Renderer *ren, const char *arg, char *out, size_t n)
+{
+    if (arg) {
+        snprintf(out, n, "%s", arg);
+        if (locate_identify(out) != DISC_INVALID) { locate_remember(out); return true; }
+    } else if (locate_disc(out, n)) {
+        locate_remember(out);
+        return true;
+    }
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Rondo Recomp",
+                             "Select the .cue file of your Castlevania: Rondo of Blood disc image.\n"
+                             "It will be remembered for next time.", win);
+    for (;;) {
+        if (!pick_file(win, ren, out, n)) return false;
+        DiscKind kind = locate_identify(out);
+        if (kind == DISC_RONDO) { locate_remember(out); return true; }
+        if (kind == DISC_PCE_UNKNOWN) {
+            const SDL_MessageBoxButtonData buttons[] = {
+                {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Use it"},
+                {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Choose another"},
+            };
+            const SDL_MessageBoxData box = {
+                SDL_MESSAGEBOX_WARNING, win, "Rondo Recomp",
+                "This is a PC Engine CD image, but not a release of Rondo of Blood this build "
+                "recognises. Use it anyway?", 2, buttons, NULL};
+            int id = 0;
+            SDL_ShowMessageBox(&box, &id);
+            if (id == 1) { locate_remember(out); return true; }
+            continue;
+        }
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo Recomp",
+                                 "That file could not be read as a PC Engine CD image.\n"
+                                 "Choose the .cue file of the disc image.", win);
+    }
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo Recomp",
-                                 "usage: rondo <game.cue>", NULL);
-        return 2;
-    }
-    static Pce pce;
-    char err[256];
-    if (!pce_init(&pce, argv[1], err, sizeof err) || !pce_boot(&pce, err, sizeof err)) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo Recomp", err, NULL);
-        return 1;
-    }
-
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
@@ -79,6 +144,19 @@ int main(int argc, char **argv)
         return 1;
     }
     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+
+    char disc_path[1024];
+    if (!choose_disc(win, ren, argc > 1 ? argv[1] : NULL, disc_path, sizeof disc_path)) {
+        SDL_Quit();
+        return 0;
+    }
+    static Pce pce;
+    char err[256];
+    if (!pce_init(&pce, disc_path, err, sizeof err) || !pce_boot(&pce, err, sizeof err)) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo Recomp", err, win);
+        SDL_Quit();
+        return 1;
+    }
 
     SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, AUDIO_RATE};
     SDL_AudioStream *audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
