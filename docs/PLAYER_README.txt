@@ -99,6 +99,9 @@ where you let go; up to 30 minutes are kept. Rewinding never changes your saved 
 
 In-game saves are kept in %APPDATA%\RondoRecomp\RondoRecomp\bram.bin (bram-ja.bin for
 Japanese), save states in %APPDATA%\RondoRecomp\RondoRecomp\states\.
+To keep a separate set (options, saves, states), set the environment variable
+RONDORECOMP_PROFILE to a folder before starting Setup or rondo.exe; your usual ones are
+left alone.
 
 Japanese and English
 --------------------

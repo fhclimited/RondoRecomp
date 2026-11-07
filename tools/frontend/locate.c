@@ -9,12 +9,28 @@
 
 /* ---- remembered path ------------------------------------------------------- */
 
-static bool pref_file(char *out, size_t n)
+bool locate_profile_dir(char *out, size_t n)
 {
+    const char *env = SDL_getenv("RONDORECOMP_PROFILE");
+    if (env && *env) {
+        size_t l = strlen(env);
+        bool sep = env[l - 1] == '/' || env[l - 1] == '\\';
+        snprintf(out, n, "%s%s", env, sep ? "" : "/");
+        SDL_CreateDirectory(out);
+        return true;
+    }
     char *dir = SDL_GetPrefPath("RondoRecomp", "RondoRecomp");
     if (!dir) return false;
-    snprintf(out, n, "%sdisc.txt", dir);
+    snprintf(out, n, "%s", dir);
     SDL_free(dir);
+    return true;
+}
+
+static bool pref_file(char *out, size_t n)
+{
+    char dir[1024];
+    if (!locate_profile_dir(dir, sizeof dir)) return false;
+    snprintf(out, n, "%sdisc.txt", dir);
     return true;
 }
 

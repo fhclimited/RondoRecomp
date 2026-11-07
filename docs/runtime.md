@@ -197,7 +197,15 @@ screenshots of the video modes, menu pages and start screen to DIR; checks the s
 screen's keys and mouse layout; switches language at the end) and `rondo.exe
 --autotest-start` (the start screen for 600 frames with the attract mode behind it, a mouse
 click on Play sent through the event queue, 300 frames of play). All log to `rondo.log` and
-keep their files in a `test` folder, never touching the player's saves.
+keep their files in a `test` folder, never touching the player's saves. Their window
+cannot take the keyboard focus, and they ignore real keyboard, mouse and controller input
+(events and polled state alike): only the input events a test sends itself, marked with
+the device id `TEST_INPUT`, are taken, so typing elsewhere while one runs cannot change it.
+
+Profile: settings, saves, states and the remembered disc live in the pref folder
+(`%APPDATA%\RondoRecomp\RondoRecomp`), or in the folder named by the `RONDORECOMP_PROFILE`
+environment variable (`locate_profile_dir`), which Setup and rondo.exe started from each
+other inherit: a whole separate player, e.g. to go through the first run again.
 The build copies `SDL3.dll` and `libiconv-2.dll` next to the executable.
 
 ### Headless runner

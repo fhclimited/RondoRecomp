@@ -281,6 +281,25 @@ static void state_path(char *out, size_t n, const Session *ss, int slot)
     snprintf(out, n, "%sstates/slot%d%s.state", pref_dir, slot, ss->language == LANG_JA ? "-ja" : "");
 }
 
+/* Input events a test run sends itself carry this device id; test runs drop all other input
+ * events (keyboard, mouse, controller), whatever window has the focus. */
+#define TEST_INPUT 0x52524543u
+
+static bool test_input(const SDL_Event *ev)
+{
+    switch (ev->type) {
+    case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:
+        return ev->key.which == TEST_INPUT;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+        return ev->button.which == TEST_INPUT;
+    case SDL_EVENT_MOUSE_MOTION: case SDL_EVENT_MOUSE_WHEEL: case SDL_EVENT_TEXT_INPUT:
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        return false;
+    default:
+        return true;   /* window, device and other events */
+    }
+}
+
 static void screenshot(SDL_Renderer *ren, const char *path)
 {
     SDL_Surface *s = SDL_RenderReadPixels(ren, NULL);
@@ -311,10 +330,7 @@ int main(int argc, char **argv)
     char autotest_log[2048] = "";
 #define TLOG(...) snprintf(autotest_log + strlen(autotest_log), sizeof autotest_log - strlen(autotest_log), __VA_ARGS__)
 
-    {
-        char *dir = SDL_GetPrefPath("RondoRecomp", "RondoRecomp");
-        if (dir) { snprintf(pref_dir, sizeof pref_dir, "%s", dir); SDL_free(dir); }
-    }
+    locate_profile_dir(pref_dir, sizeof pref_dir);
     char settings_path[1100], states_dir[1100];
     snprintf(settings_path, sizeof settings_path, "%ssettings.ini", pref_dir);
     if (autotest || features_dir || autotest_start) {
@@ -341,6 +357,7 @@ int main(int argc, char **argv)
     snprintf(title, sizeof title, "Rondo Recomp (%s)", recomp_build_id);
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (set.fullscreen && !test_mode) flags |= SDL_WINDOW_FULLSCREEN;
+    if (test_mode) flags |= SDL_WINDOW_NOT_FOCUSABLE;   /* never takes the keyboard from the player */
     SDL_Window *win = SDL_CreateWindow(title, features_dir ? 1280 : 960, 720, flags);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, NULL) : NULL;
     Video video;
@@ -432,6 +449,7 @@ int main(int argc, char **argv)
                 click.button.button = SDL_BUTTON_LEFT;
                 click.button.down = true;
                 click.button.clicks = 1;
+                click.button.which = TEST_INPUT;
                 click.button.x = wx;
                 click.button.y = wy;
                 SDL_PushEvent(&click);
@@ -455,6 +473,7 @@ int main(int argc, char **argv)
                 key.key.scancode = SDL_SCANCODE_RETURN;
                 key.key.key = SDLK_RETURN;
                 key.key.down = true;
+                key.key.which = TEST_INPUT;
                 SDL_PushEvent(&key);
                 t_phase = 3;
                 t_phase_at = t_start_loops;
@@ -469,6 +488,9 @@ int main(int argc, char **argv)
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) { running = false; continue; }
+            /* test runs only take the input they send themselves (marked TEST_INPUT), so a key
+             * pressed on the desktop while one runs cannot change it */
+            if (test_mode && !test_input(&ev)) continue;
             input_device_event(&in, &ev);
             if (menu.open) {
                 MenuResult r = MENU_NOTHING;
@@ -601,7 +623,7 @@ int main(int argc, char **argv)
             }
         }
         if (menu.open) {
-            Nav nav = input_nav_stick(&in);
+            Nav nav = test_mode ? NAV_NONE : input_nav_stick(&in);
             if (nav != NAV_NONE) {
                 MenuResult r = menu_nav(&menu, &set, nav);    /* the stick only steps and changes values */
                 if (r == MENU_LANGUAGE) {
@@ -639,7 +661,7 @@ int main(int argc, char **argv)
                 skip_intro = !game_in_cinematic(&pce);
                 if (features_dir) { t_cine_start = (long)pce.frame; t_cine_ns = SDL_GetTicksNS(); }
             }
-            rewinding = set.rewind && have_rewind && !skipping && input_rewind_held(&in);
+            rewinding = set.rewind && have_rewind && !skipping && !test_mode && input_rewind_held(&in);
             if (autotest) {
                 uint64_t f = pce.frame;
                 char path[1200];
@@ -715,7 +737,7 @@ int main(int argc, char **argv)
                     rewind_held_frames = 0;
                     input_cancel_macros(&in);
                 }
-                uint8_t pad = features_dir ? capture_pad((int)pce.frame) : input_game(&in);
+                uint8_t pad = features_dir ? capture_pad((int)pce.frame) : test_mode ? 0 : input_game(&in);
                 if (hold_input && !features_dir) { /* until everything is let go */
                     if (pad) pad = 0;
                     else hold_input = false;
@@ -723,7 +745,7 @@ int main(int argc, char **argv)
                 pce.pad = pad;
                 run_frame();
                 game_apply_cheats(&pce, &cheats, &gw);
-                game_apply_run(&pce, !features_dir && input_run_held(&in), &gw);
+                game_apply_run(&pce, !test_mode && input_run_held(&in), &gw);
                 ran_frame = true;
                 if (have_rewind && set.rewind) rewind_record(&rw, &pce, pce.pad);
                 flush_bram(&ss);
