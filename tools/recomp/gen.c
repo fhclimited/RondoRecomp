@@ -103,6 +103,7 @@ typedef struct Ins {
     uint8_t b[7];
     uint16_t target;
     bool set_inline;             /* SET: the next instruction is emitted here in T mode */
+    uint8_t vol;                 /* bit i: operand byte i is patched at runtime (read from memory) */
 } Ins;
 
 static bool decode(const uint8_t *img, uint16_t base, uint16_t addr, Ins *in)
@@ -180,6 +181,14 @@ static const struct { int frame, len; uint8_t pad; } capture_script[] = {
 typedef struct Seed { uint8_t bank; uint16_t addr; uint32_t h; int img; } Seed;  /* img: capture snapshot or -1 */
 static Seed *seeds;
 static int n_seeds, cap_seeds;
+
+static const Seed *g_sort_seeds;
+static int cmp_seed_key(const void *a, const void *b)
+{
+    const Seed *x = &g_sort_seeds[*(const int *)a], *y = &g_sort_seeds[*(const int *)b];
+    uint32_t kx = (uint32_t)x->bank << 16 | x->addr, ky = (uint32_t)y->bank << 16 | y->addr;
+    return kx < ky ? -1 : kx > ky;
+}
 
 static void add_seed(uint8_t bank, uint16_t addr, uint32_t h, int img)
 {
@@ -285,6 +294,8 @@ typedef struct Chunk {
     uint8_t cov[0x2000 / 8];     /* bytes compiled (incl. instructions inlined after SET) */
     uint8_t setinl[0x2000 / 8];  /* SET whose next instruction is emitted in T mode */
     uint8_t ent[0x2000 / 8];     /* entry points */
+    uint8_t vol[0x2000 / 8];     /* operand bytes the game patches at runtime */
+    bool has_vol;
 } Chunk;
 
 #define BIT_GET(a, i) ((a)[(i) >> 3] >> ((i) & 7) & 1)
@@ -294,6 +305,9 @@ static Chunk **chunks;
 static int n_chunks, cap_chunks;
 static int *first_chunk;         /* [bank * 8 + window] -> head of a chunk list (index + 1) */
 static int *next_chunk;          /* per chunk: next chunk of the same bank/window (index + 1) */
+
+/* operand bytes known to be patched at runtime, per bank window: [bank * 8 + window] */
+static uint8_t (*bank_vol)[0x2000 / 8];
 
 typedef struct Work { int img; uint16_t addr; } Work;
 static Work *work;
@@ -357,14 +371,53 @@ static void closure(int img_index, uint16_t base, uint16_t entry)
 }
 
 /* Do two images agree on every byte covered by cov_a or cov_b? */
-static bool agree(const uint8_t *a, const uint8_t *b, const uint8_t *cov_a, const uint8_t *cov_b)
+static bool agree(const uint8_t *a, const uint8_t *b, const uint8_t *cov_a, const uint8_t *cov_b,
+                  const uint8_t *skip)
 {
     for (int w = 0; w < 0x2000 / 8; w++) {
-        uint8_t m = (uint8_t)(cov_a[w] | (cov_b ? cov_b[w] : 0));
+        uint8_t m = (uint8_t)((cov_a[w] | (cov_b ? cov_b[w] : 0)) & ~skip[w]);
         if (!m) continue;
         for (int k = 0; k < 8; k++)
             if ((m >> k & 1) && a[w * 8 + k] != b[w * 8 + k]) return false;
     }
+    return true;
+}
+
+/* An entry captured with several variants: compare all of them over the code reachable from
+ * the entry. Bytes that differ only as operands of ordinary instructions are recorded as
+ * patched at runtime for that bank window (read from memory by the generated code and left
+ * out of code checks). If opcodes, branch offsets or jump targets differ, the variants are
+ * different code and nothing is recorded. */
+static bool find_patched_operands(const int *imgs, int n_imgs, uint16_t entry)
+{
+    const Image *base_im = images[imgs[0]];
+    uint16_t base = entry & 0xE000;
+    Ins first;
+    if (!decode(base_im->data, base, entry, &first)) return false;
+    int saved_work = n_work;
+    closure(imgs[0], base, entry);
+    n_work = saved_work;                         /* analysis only: no new work */
+    static uint8_t vol[0x2000 / 8];
+    memset(vol, 0, sizeof vol);
+    bool any = false;
+    for (int v = 1; v < n_imgs; v++) {
+        const uint8_t *d = images[imgs[v]]->data;
+        for (int off = 0; off < 0x2000; off++)
+            if (BIT_GET(scratch.cov, off) && d[off] != base_im->data[off]) { BIT_SET(vol, off); any = true; }
+    }
+    if (!any) return false;
+    for (int off = 0; off < 0x2000; off++) {
+        if (!BIT_GET(scratch.inc, off)) continue;
+        if (BIT_GET(vol, off)) return false;                        /* opcode */
+        Ins in;
+        decode(base_im->data, base, (uint16_t)(base + off), &in);
+        int fl = flow_of(in.op);
+        bool ok_operand = fl == F_SEQ || fl == F_EXIT_AFTER || in.op == 0x4C || in.op == 0x20;
+        for (int b = 1; b < in.len; b++)
+            if (BIT_GET(vol, off + b) && !ok_operand) return false;
+    }
+    int slot = base_im->bank * 8 + (base >> 13);
+    for (int w = 0; w < 0x2000 / 8; w++) bank_vol[slot][w] |= vol[w];
     return true;
 }
 
@@ -380,7 +433,7 @@ static void add_entry(int img_index, uint16_t entry, int *total_ins)
     /* already an entry of a chunk this image agrees with? */
     for (int ci = first_chunk[slot]; ci; ci = next_chunk[ci - 1]) {
         Chunk *k = chunks[ci - 1];
-        if (BIT_GET(k->ent, eoff) && agree(images[k->img]->data, im->data, k->cov, NULL)) return;
+        if (BIT_GET(k->ent, eoff) && agree(images[k->img]->data, im->data, k->cov, NULL, bank_vol[slot])) return;
     }
     Ins first;
     if (!decode(im->data, base, entry, &first)) return;
@@ -389,7 +442,7 @@ static void add_entry(int img_index, uint16_t entry, int *total_ins)
     Chunk *target = NULL;
     for (int ci = first_chunk[slot]; ci; ci = next_chunk[ci - 1]) {
         Chunk *k = chunks[ci - 1];
-        if (agree(images[k->img]->data, im->data, k->cov, scratch.cov)) { target = k; break; }
+        if (agree(images[k->img]->data, im->data, k->cov, scratch.cov, bank_vol[slot])) { target = k; break; }
     }
     if (!target) {
         if (n_chunks == cap_chunks) {
@@ -421,6 +474,7 @@ typedef struct View {
     const Image *img;
     uint16_t base;
     const uint8_t *inc;
+    const uint8_t *vol;          /* patched operand bytes, or NULL */
     Ins *ins;
     int n;
 } View;
@@ -433,32 +487,52 @@ static bool included(const View *r, uint16_t a)
 
 /* ---- C emission -------------------------------------------------------------------- */
 
+/* Operand bytes: constants, or reads from the code itself when the game patches them. */
+static void opnd8(char *o, size_t n, const Ins *in, int i)
+{
+    if (in->vol >> i & 1) snprintf(o, n, "hu_rd(c, 0x%04X)", (unsigned)(uint16_t)(in->addr + i));
+    else snprintf(o, n, "0x%02X", in->b[i]);
+}
+
+static void opnd16(char *o, size_t n, const Ins *in, int i)
+{
+    if (in->vol >> i & 3)
+        snprintf(o, n, "(uint16_t)(hu_rd(c, 0x%04X) | hu_rd(c, 0x%04X) << 8)",
+                 (unsigned)(uint16_t)(in->addr + i), (unsigned)(uint16_t)(in->addr + i + 1));
+    else snprintf(o, n, "0x%04X", (unsigned)(in->b[i] | in->b[i + 1] << 8));
+}
+
+static void zp_addr(char *o, size_t n, const Ins *in, int i)
+{
+    if (in->vol >> i & 1) snprintf(o, n, "(uint16_t)(0x2000 | hu_rd(c, 0x%04X))", (unsigned)(uint16_t)(in->addr + i));
+    else snprintf(o, n, "0x20%02X", in->b[i]);
+}
+
 static void ea_expr(char *o, size_t n, const Ins *in)
 {
-    const uint8_t *b = in->b;
-    unsigned w = (unsigned)(b[1] | b[2] << 8);
+    char v[96];
     switch (op_mode[in->op]) {
-    case ZP:    snprintf(o, n, "0x20%02X", b[1]); break;
-    case ZPX:   snprintf(o, n, "hu_ea_zpx(c, 0x%02X)", b[1]); break;
-    case ZPY:   snprintf(o, n, "hu_ea_zpy(c, 0x%02X)", b[1]); break;
-    case IZX:   snprintf(o, n, "hu_ea_izx(c, 0x%02X)", b[1]); break;
-    case IZY:   snprintf(o, n, "hu_ea_izy(c, 0x%02X)", b[1]); break;
-    case IZP:   snprintf(o, n, "hu_ea_izp(c, 0x%02X)", b[1]); break;
-    case ABS:   snprintf(o, n, "0x%04X", w); break;
-    case ABX:   snprintf(o, n, "hu_ea_abx(c, 0x%04X)", w); break;
-    case ABY:   snprintf(o, n, "hu_ea_aby(c, 0x%04X)", w); break;
-    case IMZP:  snprintf(o, n, "0x20%02X", b[2]); break;
-    case IMZPX: snprintf(o, n, "hu_ea_zpx(c, 0x%02X)", b[2]); break;
-    case IMAB:  snprintf(o, n, "0x%04X", (unsigned)(b[2] | b[3] << 8)); break;
-    case IMABX: snprintf(o, n, "hu_ea_abx(c, 0x%04X)", (unsigned)(b[2] | b[3] << 8)); break;
+    case ZP:    zp_addr(o, n, in, 1); break;
+    case ZPX:   opnd8(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_zpx(c, %s)", v); break;
+    case ZPY:   opnd8(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_zpy(c, %s)", v); break;
+    case IZX:   opnd8(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_izx(c, %s)", v); break;
+    case IZY:   opnd8(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_izy(c, %s)", v); break;
+    case IZP:   opnd8(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_izp(c, %s)", v); break;
+    case ABS:   opnd16(o, n, in, 1); break;
+    case ABX:   opnd16(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_abx(c, %s)", v); break;
+    case ABY:   opnd16(v, sizeof v, in, 1); snprintf(o, n, "hu_ea_aby(c, %s)", v); break;
+    case IMZP:  zp_addr(o, n, in, 2); break;
+    case IMZPX: opnd8(v, sizeof v, in, 2); snprintf(o, n, "hu_ea_zpx(c, %s)", v); break;
+    case IMAB:  opnd16(o, n, in, 2); break;
+    case IMABX: opnd16(v, sizeof v, in, 2); snprintf(o, n, "hu_ea_abx(c, %s)", v); break;
     default:    snprintf(o, n, "0"); break;
     }
 }
 
 static void val_expr(char *o, size_t n, const Ins *in)
 {
-    if (op_mode[in->op] == IMM) { snprintf(o, n, "0x%02X", in->b[1]); return; }
-    char ea[64];
+    if (op_mode[in->op] == IMM) { opnd8(o, n, in, 1); return; }
+    char ea[200];
     ea_expr(ea, sizeof ea, in);
     snprintf(o, n, "hu_rd(c, %s)", ea);
 }
@@ -476,6 +550,7 @@ typedef struct SmcCtx {
 static bool const_ea(const Ins *in, uint16_t *addr)
 {
     const uint8_t *b = in->b;
+    if (in->vol) return false;
     switch (op_mode[in->op]) {
     case ZP:   *addr = (uint16_t)(0x2000 | b[1]); return true;
     case ABS:  *addr = (uint16_t)(b[1] | b[2] << 8); return true;
@@ -506,9 +581,10 @@ static void emit_store(FILE *f, const Ins *in, const char *ea, const char *op, c
 static void emit_body(FILE *f, const Ins *in, bool t, const SmcCtx *x)
 {
     uint8_t op = in->op;
-    char V[96], A[80];
+    char V[256], A[220], I1[96], I2[96], I3[96];
     val_expr(V, sizeof V, in);
     ea_expr(A, sizeof A, in);
+    opnd8(I1, sizeof I1, in, 1);
     fprintf(f, "    cyc += %d;", hu_base_cycles[op]);
     static const char *const alu[8] = {"HU_ORA", "HU_AND", "HU_EOR", "HU_ADC", NULL, NULL, NULL, "HU_SBC"};
     uint8_t lo = op & 0x1F, grp = op >> 5;
@@ -543,7 +619,7 @@ static void emit_body(FILE *f, const Ins *in, bool t, const SmcCtx *x)
     case 0xE0: case 0xE4: case 0xEC: fprintf(f, " hu_cmp(c, c->x, %s);\n", V); return;
     case 0xC0: case 0xC4: case 0xCC: fprintf(f, " hu_cmp(c, c->y, %s);\n", V); return;
     case 0x89: case 0x24: case 0x34: case 0x2C: case 0x3C: fprintf(f, " hu_bit(c, %s);\n", V); return;
-    case 0x83: case 0xA3: case 0x93: case 0xB3: fprintf(f, " hu_tst(c, 0x%02X, hu_rd(c, %s));\n", in->b[1], A); return;
+    case 0x83: case 0xA3: case 0x93: case 0xB3: fprintf(f, " hu_tst(c, %s, hu_rd(c, %s));\n", I1, A); return;
     case 0x04: case 0x0C: emit_store(f, in, A, "hu_tsb_trb(c, ea_, 1)", x); return;
     case 0x14: case 0x1C: emit_store(f, in, A, "hu_tsb_trb(c, ea_, 0)", x); return;
     case 0x0A: fprintf(f, " c->a = hu_shift(c, HU_ASL, c->a);\n"); return;
@@ -589,17 +665,18 @@ static void emit_body(FILE *f, const Ins *in, bool t, const SmcCtx *x)
     case 0xD8: fprintf(f, " c->p &= (uint8_t)~HU_FD;\n"); return;
     case 0xF8: fprintf(f, " c->p |= HU_FD;\n"); return;
     case 0xB8: fprintf(f, " c->p &= (uint8_t)~HU_FV;\n"); return;
-    case 0x53: fprintf(f, " hu_tam(c, 0x%02X);\n", in->b[1]); return;
-    case 0x43: fprintf(f, " hu_tma(c, 0x%02X);\n", in->b[1]); return;
-    case 0x03: fprintf(f, " hu_st(c, 0, 0x%02X);\n", in->b[1]); return;
-    case 0x13: fprintf(f, " hu_st(c, 1, 0x%02X);\n", in->b[1]); return;
-    case 0x23: fprintf(f, " hu_st(c, 2, 0x%02X);\n", in->b[1]); return;
+    case 0x53: fprintf(f, " hu_tam(c, %s);\n", I1); return;
+    case 0x43: fprintf(f, " hu_tma(c, %s);\n", I1); return;
+    case 0x03: fprintf(f, " hu_st(c, 0, %s);\n", I1); return;
+    case 0x13: fprintf(f, " hu_st(c, 1, %s);\n", I1); return;
+    case 0x23: fprintf(f, " hu_st(c, 2, %s);\n", I1); return;
     case 0x54: fprintf(f, " c->high_speed = false;\n"); return;
     case 0xD4: fprintf(f, " c->high_speed = true;\n"); return;
     case 0x73: case 0xC3: case 0xD3: case 0xE3: case 0xF3:
-        fprintf(f, " hu_block_push(c); cyc += hu_block_run(c, 0x%02X, 0x%04X, 0x%04X, 0x%04X);\n", op,
-                (unsigned)(in->b[1] | in->b[2] << 8), (unsigned)(in->b[3] | in->b[4] << 8),
-                (unsigned)(in->b[5] | in->b[6] << 8));
+        opnd16(I1, sizeof I1, in, 1);
+        opnd16(I2, sizeof I2, in, 3);
+        opnd16(I3, sizeof I3, in, 5);
+        fprintf(f, " hu_block_push(c); cyc += hu_block_run(c, 0x%02X, %s, %s, %s);\n", op, I1, I2, I3);
         return;
     default:
         if ((op & 0x0F) == 0x07) {
@@ -637,8 +714,10 @@ static void emit_branch_cond(char *o, size_t n, const Ins *in)
     case 0xF0: snprintf(o, n, "(c->p & HU_FZ)"); return;
     default: {
         int bit = (in->op >> 4) & 7;
-        if (in->op < 0x80) snprintf(o, n, "!(hu_rd(c, 0x20%02X) & 0x%02X)", in->b[1], 1u << bit);
-        else snprintf(o, n, "(hu_rd(c, 0x20%02X) & 0x%02X)", in->b[1], 1u << bit);
+        char z[96];
+        zp_addr(z, sizeof z, in, 1);
+        if (in->op < 0x80) snprintf(o, n, "!(hu_rd(c, %s) & 0x%02X)", z, 1u << bit);
+        else snprintf(o, n, "(hu_rd(c, %s) & 0x%02X)", z, 1u << bit);
         return;
     }
     }
@@ -678,6 +757,10 @@ static void emit_chunk(FILE *f, const View *r, const char *name, int u, int nr, 
             if (in->set_inline) {
                 Ins nx;
                 decode(r->img->data, r->base, next, &nx);
+                nx.vol = 0;
+                if (r->vol)
+                    for (int b = 1; b < nx.len && (next - r->base) + b < 0x2000; b++)
+                        if (BIT_GET(r->vol, (next - r->base) + b)) nx.vol |= (uint8_t)(1u << b);
                 fprintf(f, "    c->p &= (uint8_t)~HU_FT;\n");
                 x.next = (uint16_t)(next + nx.len);
                 emit_body(f, &nx, true, &x);
@@ -687,7 +770,7 @@ static void emit_chunk(FILE *f, const View *r, const char *name, int u, int nr, 
             }
             break;
         case F_BRANCH: {
-            char cond[96];
+            char cond[200];
             emit_branch_cond(cond, sizeof cond, in);
             fprintf(f, "    cyc += %d;\n    if (%s) {\n        cyc += 2;\n", hu_base_cycles[in->op], cond);
             emit_goto(f, r, in->addr, in->target);
@@ -697,10 +780,21 @@ static void emit_chunk(FILE *f, const View *r, const char *name, int u, int nr, 
         }
         case F_JUMP:
             fprintf(f, "    cyc += %d;\n", hu_base_cycles[in->op]);
-            emit_goto(f, r, in->addr, in->target);
+            if (in->op == 0x4C && in->vol) {
+                char t[96];
+                opnd16(t, sizeof t, in, 1);
+                fprintf(f, "    c->pc = %s; return cyc;\n", t);
+            } else {
+                emit_goto(f, r, in->addr, in->target);
+            }
             break;
         case F_CALL:
-            if (in->op == 0x20)
+            if (in->op == 0x20 && in->vol) {
+                char t[96];
+                opnd16(t, sizeof t, in, 1);
+                fprintf(f, "    cyc += 7; { uint16_t t_ = %s; hu_push_return(c, 0x%04X); c->pc = t_; } return cyc;\n",
+                        t, (uint16_t)(in->addr + 2));
+            } else if (in->op == 0x20)
                 fprintf(f, "    cyc += 7; hu_push_return(c, 0x%04X); c->pc = 0x%04X; return cyc;\n",
                         (uint16_t)(in->addr + 2), in->target);
             else
@@ -776,7 +870,28 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
     st->seeds = n_seeds;
 
     first_chunk = calloc(256 * 8, sizeof *first_chunk);
+    bank_vol = calloc(256 * 8, sizeof *bank_vol);
     int unmatched[256] = {0};
+    int total_ins = 0;
+
+    /* pass 1: entries captured with several variants -> bytes the game patches */
+    {
+        int *order = malloc(sizeof(int) * (size_t)(n_seeds ? n_seeds : 1)), n_order = 0;
+        for (int s = 0; s < n_seeds; s++) if (seeds[s].img >= 0) order[n_order++] = s;
+        g_sort_seeds = seeds;
+        qsort(order, (size_t)n_order, sizeof *order, cmp_seed_key);
+        int *imgs = malloc(sizeof(int) * (size_t)(n_order ? n_order : 1));
+        for (int i = 0; i < n_order;) {
+            int j = i, n = 0;
+            while (j < n_order && seeds[order[j]].bank == seeds[order[i]].bank && seeds[order[j]].addr == seeds[order[i]].addr)
+                imgs[n++] = seeds[order[j++]].img;
+            if (n >= 4 && find_patched_operands(imgs, n, seeds[order[i]].addr)) st->volatile_entries++;
+            i = j;
+        }
+        free(imgs);
+        free(order);
+    }
+
     for (int s = 0; s < n_seeds; s++) {
         if (seeds[s].img >= 0) {                 /* found by the capture run: its own snapshot */
             push_work(seeds[s].img, seeds[s].addr);
@@ -801,7 +916,6 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
     seeds = NULL;
     n_seeds = cap_seeds = 0;
 
-    int total_ins = 0;
     for (int w = 0; w < n_work && total_ins < max_total; w++) add_entry(work[w].img, work[w].addr, &total_ins);
     if (g_verbose) {
         int with = 0;
@@ -811,6 +925,47 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
     free(work);
     work = NULL;
     n_work = cap_work = 0;
+
+    /* stores to constant addresses that land on an operand of the chunk's own code: the
+     * game patches that instruction while running, so read the operand at runtime */
+    for (int ci = 0; ci < n_chunks; ci++) {
+        Chunk *k = chunks[ci];
+        const Image *im = images[k->img];
+        uint8_t *bv = bank_vol[im->bank * 8 + (k->base >> 13)];
+        for (int off = 0; off < 0x2000; off++) {
+            if (!BIT_GET(k->inc, off)) continue;
+            Ins in;
+            decode(im->data, k->base, (uint16_t)(k->base + off), &in);
+            bool store = false;
+            switch (in.op) {
+            case 0x8D: case 0x8E: case 0x8C: case 0x9C: case 0x0E: case 0x2E: case 0x4E: case 0x6E:
+            case 0xEE: case 0xCE: case 0x0C: case 0x1C:
+                store = true;
+                break;
+            default:
+                break;
+            }
+            if (!store) continue;
+            uint16_t t = (uint16_t)(in.b[1] | in.b[2] << 8);
+            if ((t & 0xE000) != k->base) continue;
+            uint32_t to = (uint32_t)(t - k->base);
+            if (!BIT_GET(k->cov, to) || BIT_GET(k->inc, to)) continue;      /* not code, or an opcode */
+            /* find the instruction owning that byte (within 6 bytes before it) */
+            for (int back = 1; back <= 6 && (int)to - back >= 0; back++) {
+                uint32_t io = to - (uint32_t)back;
+                if (!BIT_GET(k->inc, io)) continue;
+                Ins owner;
+                decode(im->data, k->base, (uint16_t)(k->base + io), &owner);
+                if ((int)owner.len <= back) break;
+                int fl = flow_of(owner.op);
+                if (fl == F_SEQ || fl == F_EXIT_AFTER || owner.op == 0x4C || owner.op == 0x20) {
+                    BIT_SET(bv, to);
+                    st->self_patched++;
+                }
+                break;
+            }
+        }
+    }
 
     /* emit unique chunks */
     FILE *hdr = open_out(o->out_dir, "regions.h", err, err_len);
@@ -830,11 +985,36 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
         Chunk *k = chunks[ci];
         if (!k->n_ins) continue;
         const Image *im = images[k->img];
+        {
+            const uint8_t *bv = bank_vol[im->bank * 8 + (k->base >> 13)];
+            for (int off = 0; off < 0x2000; off++) {
+                if (!BIT_GET(k->inc, off)) continue;
+                Ins in;
+                decode(im->data, k->base, (uint16_t)(k->base + off), &in);
+                int fl = flow_of(in.op);
+                int len = in.len;
+                int from = 1;
+                if (fl == F_SET && BIT_GET(k->setinl, off)) {      /* the inlined instruction after SET */
+                    Ins nx;
+                    decode(im->data, k->base, (uint16_t)(k->base + off + 1), &nx);
+                    from = 1;
+                    len = 1 + nx.len;
+                    fl = F_SEQ;
+                    for (int b = 2; b < len && off + b < 0x2000; b++)
+                        if (BIT_GET(bv, off + b)) { BIT_SET(k->vol, off + b); k->has_vol = true; }
+                    continue;
+                }
+                if (fl != F_SEQ && fl != F_EXIT_AFTER && in.op != 0x4C && in.op != 0x20) continue;
+                for (int b = from; b < len && off + b < 0x2000; b++)
+                    if (BIT_GET(bv, off + b)) { BIT_SET(k->vol, off + b); k->has_vol = true; }
+            }
+        }
         int nr = 0;
+#define CODE_BYTE(o) (BIT_GET(k->cov, (o)) && !(k->has_vol && BIT_GET(k->vol, (o))))
         for (int off = 0; off < 0x2000;) {
-            if (!BIT_GET(k->cov, off)) { off++; continue; }
+            if (!CODE_BYTE(off)) { off++; continue; }
             int start = off;
-            while (off < 0x2000 && BIT_GET(k->cov, off)) off++;
+            while (off < 0x2000 && CODE_BYTE(off)) off++;
             ranges[2 * nr] = (uint16_t)start;
             ranges[2 * nr + 1] = (uint16_t)(off - start);
             nr++;
@@ -843,6 +1023,7 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
         uint64_t sig = code_hash ^ ((uint64_t)im->bank << 56) ^ ((uint64_t)k->base << 40);
         sig = (sig ^ fnv64(k->inc, sizeof k->inc)) * 0x100000001b3ull;
         sig = (sig ^ fnv64(k->setinl, sizeof k->setinl)) * 0x100000001b3ull;
+        if (k->has_vol) sig = (sig ^ fnv64(k->vol, sizeof k->vol)) * 0x100000001b3ull;
 
         int u = -1;
         for (int j = 0; j < n_uniq; j++)
@@ -862,9 +1043,13 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
                 if (!BIT_GET(k->inc, off)) continue;
                 decode(im->data, k->base, (uint16_t)(k->base + off), &ins[n]);
                 ins[n].set_inline = BIT_GET(k->setinl, off);
+                ins[n].vol = 0;
+                if (k->has_vol)
+                    for (int b = 1; b < ins[n].len && off + b < 0x2000; b++)
+                        if (BIT_GET(k->vol, off + b)) ins[n].vol |= (uint8_t)(1u << b);
                 n++;
             }
-            View v = {im, k->base, k->inc, ins, n};
+            View v = {im, k->base, k->inc, k->has_vol ? k->vol : NULL, ins, n};
             if (!f || in_file >= 40) {
                 if (f) { bytes += (size_t)ftell(f); fclose(f); }
                 char name[64];
@@ -882,7 +1067,9 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
             st->instructions += n;
         }
         for (int off = 0; off < 0x2000; off++) {
-            if (!BIT_GET(k->ent, off) || !BIT_GET(k->inc, off)) continue;
+            /* every instruction of a chunk can be entered (its function switches on the PC), so
+             * exits mid-loop (cycle budget, self-patching stores) resume natively */
+            if (!BIT_GET(k->inc, off)) continue;
             if (n_entries == cap_entries) {
                 cap_entries = cap_entries ? cap_entries * 2 : 16384;
                 entries = realloc(entries, (size_t)cap_entries * sizeof *entries);
@@ -926,8 +1113,10 @@ bool gen_run(const GenOptions *o, GenStats *st, GenLog log, char *err, int err_l
     st->entries = ne;
     st->files = file_index + 2;
     st->c_bytes = bytes;
-    say("  %d chunks, %d entry points, %d instructions from %d of %d seeds; %d C files, %.1f MB of C",
-        n_uniq, ne, st->instructions, st->seeds_matched, st->seeds, st->files, (double)bytes / 1e6);
+    say("  %d self-patching stores found", st->self_patched);
+    say("  %d chunks (%d entries with runtime-patched operands), %d entry points, %d instructions from %d of %d seeds; "
+        "%d C files, %.1f MB of C",
+        n_uniq, st->volatile_entries, ne, st->instructions, st->seeds_matched, st->seeds, st->files, (double)bytes / 1e6);
     for (int u = 0; u < n_uniq; u++) free(uniq[u].ranges);
     free(uniq);
     free(entries);

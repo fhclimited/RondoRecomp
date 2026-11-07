@@ -19,6 +19,8 @@ typedef struct GenStats {
     int groups_loaded;          /* overlay groups run through the game's loader */
     int capture_seeds;          /* entry points found by the headless capture run */
     int seeds, seeds_matched;
+    int volatile_entries;
+    int self_patched;           /* constant stores into the code's own operands */       /* self-modifying entries compiled with runtime-read operands */
     int regions, entries, instructions;   /* regions = distinct chunks */
     int files;
     size_t c_bytes;

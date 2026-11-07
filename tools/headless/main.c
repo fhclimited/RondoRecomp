@@ -73,7 +73,7 @@ int main(int argc, char **argv)
     long frames = 600, shot_every = 60;
     const char *out = "work/shots";
     bool log_bios = false, log_all = false;
-    const char *bios_reset = NULL, *wav_path = NULL, *seeds_path = NULL;
+    const char *bios_reset = NULL, *wav_path = NULL, *seeds_path = NULL, *misses_path = NULL;
     int verify = 0;
     bool no_native = false;
     Press presses[64];
@@ -88,6 +88,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--bios-reset") && i + 1 < argc) bios_reset = argv[++i];
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav_path = argv[++i];
         else if (!strcmp(argv[i], "--record-seeds") && i + 1 < argc) seeds_path = argv[++i];
+        else if (!strcmp(argv[i], "--misses") && i + 1 < argc) misses_path = argv[++i];
         else if (!strcmp(argv[i], "--verify") && i + 1 < argc) verify = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-native")) no_native = true;
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
@@ -199,6 +200,7 @@ int main(int argc, char **argv)
                            (unsigned long long)rs->verify_failures);
         printf("\n");
         if (seeds_path && recomp_write_misses(seeds_path)) printf("Seeds written to %s\n", seeds_path);
+        if (misses_path && recomp_write_misses(misses_path)) printf("Misses written to %s\n", misses_path);
     }
     printf("\nBIOS calls:");
     for (int i = 0; i < PCE_BIOS_ENTRIES; i++)
