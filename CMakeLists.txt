@@ -18,6 +18,7 @@ add_library(pce STATIC
   runtime/pce/pce.c
   runtime/pce/video.c
   runtime/pce/disc.c
+  runtime/pce/discid.c
   runtime/pce/bios_hle.c
   runtime/util/png.c)
 target_include_directories(pce PUBLIC runtime)
@@ -33,7 +34,7 @@ get_filename_component(_cc_prefix "${_cc_prefix}" DIRECTORY)
 find_path(SDL3_INCLUDE_DIR SDL3/SDL.h HINTS "${_cc_prefix}/include")
 find_library(SDL3_LIBRARY NAMES SDL3 HINTS "${_cc_prefix}/lib")
 if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
-  add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c)
+  add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c runtime/recomp/recomp_none.c)
   target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR})
   target_link_libraries(rondo PRIVATE pce ${SDL3_LIBRARY})
   get_filename_component(SDL3_LIBDIR "${SDL3_LIBRARY}" DIRECTORY)
@@ -45,8 +46,25 @@ if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll_path_${_dll}}" "$<TARGET_FILE_DIR:rondo>")
     endif()
   endforeach()
+
+  # Setup: imports the player's disc image and builds rondo.exe with zig cc
+  find_library(ZLIB_STATIC NAMES libz.a z HINTS "${_cc_prefix}/lib")
+  if(ZLIB_STATIC)
+    add_executable(rondo_setup tools/setup/main.c tools/setup/zip.c runtime/pce/discid.c runtime/pce/disc.c)
+    target_include_directories(rondo_setup PRIVATE runtime ${SDL3_INCLUDE_DIR})
+    target_link_libraries(rondo_setup PRIVATE ${SDL3_LIBRARY} ${ZLIB_STATIC})
+  else()
+    message(STATUS "zlib not found: rondo_setup is not built")
+  endif()
+
+  # SDK that Setup compiles from: build/sdk
+  add_custom_target(sdk ALL
+    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${CMAKE_BINARY_DIR}/sdk
+            -DSDL_INC=${SDL3_INCLUDE_DIR} -DSDL_LIB=${SDL3_LIBDIR}/libSDL3.dll.a
+            -DSDL_BIN=${SDL3_LIBDIR}/../bin -P ${CMAKE_SOURCE_DIR}/tools/make_sdk.cmake
+    COMMENT "Assembling the Setup SDK")
 else()
-  message(STATUS "SDL3 not found: the windowed frontend (rondo) is not built")
+  message(STATUS "SDL3 not found: the windowed frontend (rondo) and Setup are not built")
 endif()
 
 # CPU conformance tests (SingleStepTests/huc6280, MIT). Download the v1 *.json.bin

@@ -15,6 +15,7 @@
 
 #include "locate.h"
 #include "pce/pce.h"
+#include "recomp/recomp.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
 #define AUDIO_RATE 44100
@@ -97,7 +98,7 @@ static bool choose_disc(SDL_Window *win, SDL_Renderer *ren, const char *arg, cha
 {
     if (arg) {
         snprintf(out, n, "%s", arg);
-        if (locate_identify(out) != DISC_INVALID) { locate_remember(out); return true; }
+        if (discid_identify(out, NULL) != DISC_INVALID) { locate_remember(out); return true; }
     } else if (locate_disc(out, n)) {
         locate_remember(out);
         return true;
@@ -107,7 +108,7 @@ static bool choose_disc(SDL_Window *win, SDL_Renderer *ren, const char *arg, cha
                              "It will be remembered for next time.", win);
     for (;;) {
         if (!pick_file(win, ren, out, n)) return false;
-        DiscKind kind = locate_identify(out);
+        DiscKind kind = discid_identify(out, NULL);
         if (kind == DISC_RONDO) { locate_remember(out); return true; }
         if (kind == DISC_PCE_UNKNOWN) {
             const SDL_MessageBoxButtonData buttons[] = {
@@ -135,7 +136,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_Window *win = SDL_CreateWindow("Rondo Recomp (interpreter)", 960, 720, SDL_WINDOW_RESIZABLE);
+    char title[256];
+    snprintf(title, sizeof title, "Rondo Recomp (%s)", recomp_build_id);
+    SDL_Window *win = SDL_CreateWindow(title, 960, 720, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, NULL) : NULL;
     SDL_Texture *tex = ren ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
                                                PCE_FB_MAX_W, PCE_FB_MAX_H) : NULL;

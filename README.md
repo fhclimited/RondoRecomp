@@ -27,11 +27,19 @@ functions needed to run the game from boot through the intro, title and save men
 CD audio. `build/rondo.exe <game.cue>` opens it in a window (SDL3). Game code still runs on
 the interpreter; static recompilation comes next. Details: [docs/runtime.md](docs/runtime.md).
 
+## Setup (player flow)
+
+`rondo_setup` takes the player's own zipped disc image, checks it, extracts it and builds
+`rondo.exe` on their machine with a bundled Zig C compiler. See
+[docs/distribution.md](docs/distribution.md).
+
 ## Layout
 
 - `runtime/cpu/` HuC6280 interpreter
 - `tests/` conformance test runners
 - `tools/pce/` platform code: disc access, HuC6280 decoder, System Card table, banked code explorer
 - `tools/rondo/` game-specific formats (overlay loader)
+- `tools/setup/` Setup: zip import, disc check, code generation, build with zig cc
+- `tools/frontend/` windowed frontend (SDL3)
 - `docs/` notes
 - `work/` local output and test data (ignored)
