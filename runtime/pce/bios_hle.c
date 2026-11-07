@@ -174,6 +174,7 @@ static int joysns(Pce *p)
         p->wram[0x228 + port] = now;
         p->wram[0x22D + port] = (uint8_t)((now ^ old) & now);
     }
+    p->cpu.page_gen[0xF8]++;
     return 300;
 }
 
@@ -311,6 +312,7 @@ int bios_hle_call(Pce *p, int idx)
         uint16_t at = p->cpu.a == 6 ? 0x2284 : (uint16_t)(0x2200 + 2 * p->cpu.a);
         p->wram[at & 0x1FFF] = p->cpu.x;
         p->wram[(at + 1) & 0x1FFF] = p->cpu.y;
+        p->cpu.page_gen[0xF8]++;
         return 30;
     }
     case EX_SCRSIZ:

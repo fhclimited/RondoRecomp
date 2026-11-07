@@ -92,7 +92,22 @@ static void bus_write(void *ctx, uint32_t a, uint8_t v)
     uint32_t bank = a >> 13;
     if (bank == 0xFF) { io_write(p, (uint16_t)(a & 0x1FFF), v); return; }
     uint8_t *pg = p->page[bank];
-    if (pg && !p->page_ro[bank]) pg[a & 0x1FFF] = v;
+    if (pg && !p->page_ro[bank]) {
+        pg[a & 0x1FFF] = v;
+        /* work RAM mirrors share $F8's write counter */
+        p->cpu.page_gen[(bank >= 0xF8 && bank <= 0xFB) ? 0xF8 : bank]++;
+    }
+}
+
+/* Fast-path pointers for plain memory (see HuC6280.page_ptr). Mirrors of work RAM
+ * stay on the slow path so their writes are counted against bank $F8. */
+static void map_fast_pages(Pce *p)
+{
+    for (int b = 0; b < 256; b++) {
+        bool mirror = b >= 0xF9 && b <= 0xFB;
+        p->cpu.page_ptr[b] = mirror ? NULL : p->page[b];
+        p->cpu.page_ram[b] = (uint8_t)(p->page[b] && !p->page_ro[b] && !mirror);
+    }
 }
 
 uint8_t pce_read8(Pce *p, uint16_t addr) { return bus_read(p, hu_phys(&p->cpu, addr)); }
@@ -152,6 +167,7 @@ bool pce_init(Pce *p, const char *cue, char *err, int err_len)
     p->page[0xF7] = p->bram;
     for (int i = 0xF8; i <= 0xFB; i++) p->page[i] = p->wram;   /* work RAM mirrors */
     hu_init(&p->cpu, (HuBus){p, bus_read, bus_write});
+    map_fast_pages(p);
     vdc_reset(&p->vdc);
     vce_reset(&p->vce);
     p->timer_clock = TIMER_PERIOD;
@@ -171,6 +187,7 @@ bool pce_map_real_bios(Pce *p, const char *path, char *err, int err_len)
         p->page[i] = img + i * 0x2000;
         p->page_ro[i] = true;
     }
+    map_fast_pages(p);
     return true;
 }
 
