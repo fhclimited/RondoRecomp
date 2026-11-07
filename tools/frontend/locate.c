@@ -95,17 +95,42 @@ static void parent(char *dir)
     while (l && dir[l - 1] != '/' && dir[l - 1] != '\\') dir[--l] = 0;
 }
 
+typedef struct {
+    char *out;
+    size_t out_len;
+    bool japanese, found;
+} LangSearch;
+
+static SDL_EnumerationResult SDLCALL visit_lang(void *userdata, const char *dirname, const char *fname)
+{
+    LangSearch *s = userdata;
+    char path[1024];
+    join(path, sizeof path, dirname, fname);
+    if (!has_cue_ext(fname) || discid_identify(path, NULL) != DISC_RONDO ||
+        (discid_language(path) == DISC_LANG_JA) != s->japanese)
+        return SDL_ENUM_CONTINUE;
+    snprintf(s->out, s->out_len, "%s", path);
+    s->found = true;
+    return SDL_ENUM_SUCCESS;
+}
+
+bool locate_installed(bool japanese, char *out, size_t out_len)
+{
+    const char *base = SDL_GetBasePath();
+    if (!base) return false;
+    char game[1024], dir[1024];
+    join(game, sizeof game, base, "game");
+    join(dir, sizeof dir, game, japanese ? "ja" : "en");
+    LangSearch s = {out, out_len, japanese, false};
+    SDL_EnumerateDirectory(dir, visit_lang, &s);
+    if (!s.found) SDL_EnumerateDirectory(game, visit_lang, &s);   /* Setup up to 0.6 */
+    return s.found;
+}
+
 bool locate_disc(char *out, size_t out_len)
 {
     const char *base = SDL_GetBasePath();
-    /* an installed build: game/ next to the executable, as written by Setup */
-    if (base) {
-        char game[1024];
-        join(game, sizeof game, base, "game");
-        Search s = {out, out_len, false, 1};
-        SDL_EnumerateDirectory(game, visit, &s);
-        if (s.found) return true;
-    }
+    if (locate_installed(false, out, out_len) || locate_installed(true, out, out_len)) return true;
     if (remembered(out, out_len)) return true;
     if (!base) return false;
     char dir[1024];

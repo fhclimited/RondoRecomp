@@ -6,8 +6,14 @@
 
 #include "pce/discid.h"
 
-/* Remembered path (if it still identifies as a PC Engine CD), else a search of the
- * folders around the executable (game/ next to it first) for a recognised disc. */
+/* A disc installed by Setup (game/en, then game/ja next to the executable), else the
+ * remembered path (if it still identifies as a PC Engine CD), else a search of the folders
+ * around the executable for a recognised disc. */
 bool locate_disc(char *out, size_t out_len);
+
+/* The disc Setup installed for a language: game/ja (japanese) or game/en next to the
+ * executable, or the single disc Setup up to 0.6 put straight into game/, if it is in that
+ * language. */
+bool locate_installed(bool japanese, char *out, size_t out_len);
 
 void locate_remember(const char *cue_path);

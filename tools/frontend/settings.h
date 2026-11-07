@@ -29,7 +29,8 @@ typedef struct Settings {
     bool play_maria;       /* every stage, the Prologue too, played as Maria */
     /* language: which disc image to run */
     int language;          /* LANG_* */
-    char disc_ja[1024];    /* the Japanese disc image (.cue), if the player added one */
+    char disc_ja[1024];    /* the Japanese disc image (.cue) the player chose, if not installed by Setup */
+    char disc_en[1024];    /* the same for the English (translated) disc */
 } Settings;
 
 void settings_default(Settings *s);

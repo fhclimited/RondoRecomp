@@ -159,9 +159,29 @@ static void flush_bram(Session *ss)
     pce.bram_dirty = false;
 }
 
-/* (Re)start the machine with a disc. The disc is checked first, so a failure leaves the
- * running game alone. */
-static bool start_game(Session *ss, const char *disc, int language, char *err, int err_len)
+/* LANG_JA for the original Japanese disc, LANG_EN for a translated one. */
+static int disc_language(const char *cue) { return discid_language(cue) == DISC_LANG_JA ? LANG_JA : LANG_EN; }
+
+/* The disc for a language: installed by Setup (game/en, game/ja), chosen for it earlier in
+ * the menu, or the main disc if it is in that language. */
+static bool disc_for(int lang, const Settings *set, const char *main_disc, char *out, size_t n)
+{
+    if (locate_installed(lang == LANG_JA, out, n)) return true;
+    const char *chosen = lang == LANG_JA ? set->disc_ja : set->disc_en;
+    if (chosen[0] && discid_identify(chosen, NULL) != DISC_INVALID && disc_language(chosen) == lang) {
+        snprintf(out, n, "%s", chosen);
+        return true;
+    }
+    if (main_disc[0] && disc_language(main_disc) == lang) {
+        snprintf(out, n, "%s", main_disc);
+        return true;
+    }
+    return false;
+}
+
+/* (Re)start the machine with a disc; the session's language is the disc's. The disc is
+ * checked first, so a failure leaves the running game alone. */
+static bool start_game(Session *ss, const char *disc, char *err, int err_len)
 {
     if (discid_identify(disc, NULL) == DISC_INVALID) {
         snprintf(err, (size_t)err_len, "%s could not be read as a PC Engine CD image", disc);
@@ -170,6 +190,7 @@ static bool start_game(Session *ss, const char *disc, int language, char *err, i
     flush_bram(ss);
     if (!pce_init(&pce, disc, err, err_len) || !pce_boot(&pce, err, err_len)) return false;
     snprintf(ss->disc, sizeof ss->disc, "%s", disc);
+    int language = disc_language(disc);
     ss->language = language;
     ss->disc_id = 0;
     discid_identify(disc, &ss->disc_id);
@@ -184,6 +205,41 @@ static bool start_game(Session *ss, const char *disc, int language, char *err, i
     if (have_rewind) rewind_reset(&rw, &pce);
     game_watch_reset(&gw, &pce);
     return true;
+}
+
+/* The Language option: restart with set->language's disc (each language is its own disc: the
+ * original Japanese one, or the English translation). Without one installed or chosen
+ * before, `ask` lets the player pick its .cue. The outcome goes to status; set->language
+ * ends up as the running disc's. */
+static void switch_language(Session *ss, Settings *set, const char *main_disc, bool ask, SDL_Window *win,
+                            SDL_Renderer *ren, char *status, size_t status_len)
+{
+    int want = set->language;
+    char disc[1024], err[256];
+    bool have = disc_for(want, set, main_disc, disc, sizeof disc), picked = false;
+    const char *problem = want == LANG_JA ? "No Japanese disc installed" : "No English disc installed";
+    if (!have && ask) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Rondo Recomp",
+            want == LANG_JA
+                ? "Japanese needs the original Japanese disc image (Akumajou Dracula X: Chi no Rondo).\n"
+                  "Select its .cue file; it will be remembered.\n"
+                  "(Running Setup with its zip installs it next to the English one.)"
+                : "English needs the English (translated) disc image.\nSelect its .cue file; it will be "
+                  "remembered.\n(Running Setup with its zip installs it next to the Japanese one.)", win);
+        if (!pick_file(win, ren, disc, sizeof disc)) problem = "No disc chosen";
+        else if (discid_identify(disc, NULL) == DISC_INVALID) problem = "That is not a PC Engine CD image";
+        else if (disc_language(disc) != want)
+            problem = want == LANG_JA ? "That is the English disc" : "That is the Japanese disc";
+        else have = picked = true;
+    }
+    if (have && start_game(ss, disc, err, sizeof err)) {
+        if (picked && want == LANG_JA) snprintf(set->disc_ja, sizeof set->disc_ja, "%s", disc);
+        if (picked && want == LANG_EN) snprintf(set->disc_en, sizeof set->disc_en, "%s", disc);
+        snprintf(status, status_len, "Restarted in %s", want == LANG_JA ? "Japanese" : "English");
+    } else {
+        snprintf(status, status_len, "%.100s", have ? err : problem);
+    }
+    set->language = ss->language;
 }
 
 static void state_path(char *out, size_t n, const Session *ss, int slot)
@@ -266,15 +322,17 @@ int main(int argc, char **argv)
     Session ss = {0};
     char err[256];
     bool started = false;
-    if (set.language == LANG_JA && set.disc_ja[0]) started = start_game(&ss, set.disc_ja, LANG_JA, err, sizeof err);
-    if (!started) {
-        set.language = LANG_EN;
-        if (!start_game(&ss, disc_path, LANG_EN, err, sizeof err)) {
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo Recomp", err, win);
-            SDL_Quit();
-            return 1;
-        }
+    {   /* the chosen language's disc if there is one (a disc on the command line wins) */
+        char want[1024];
+        if (!disc_arg && disc_for(set.language, &set, disc_path, want, sizeof want))
+            started = start_game(&ss, want, err, sizeof err);
     }
+    if (!started && !start_game(&ss, disc_path, err, sizeof err)) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rondo Recomp", err, win);
+        SDL_Quit();
+        return 1;
+    }
+    set.language = ss.language;
     /* entry points that run on the interpreter are kept next to rondo.exe; running Setup with
      * --rebuild recompiles them too */
     char misses_path[1024] = "";
@@ -344,7 +402,7 @@ int main(int argc, char **argv)
                     break;
                 }
                 case MENU_RESET:
-                    if (start_game(&ss, ss.disc, ss.language, err, sizeof err)) {
+                    if (start_game(&ss, ss.disc, err, sizeof err)) {
                         menu.open = false;
                         hold_input = true;
                         show_osd("Game reset");
@@ -355,31 +413,10 @@ int main(int argc, char **argv)
                 case MENU_QUIT:
                     running = false;
                     break;
-                case MENU_LANGUAGE: {
-                    const char *disc = disc_path;
-                    char ja[1024];
-                    if (set.language == LANG_JA) {
-                        snprintf(ja, sizeof ja, "%s", set.disc_ja);
-                        if (!ja[0] || discid_identify(ja, NULL) == DISC_INVALID) {
-                            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Rondo Recomp",
-                                "Japanese needs the original Japanese disc image (Akumajou Dracula X: "
-                                "Chi no Rondo).\nSelect its .cue file; it will be remembered.", win);
-                            if (!pick_file(win, ren, ja, sizeof ja)) ja[0] = 0;
-                        }
-                        disc = ja[0] ? ja : NULL;
-                    }
-                    if (disc && start_game(&ss, disc, set.language, err, sizeof err)) {
-                        if (set.language == LANG_JA) snprintf(set.disc_ja, sizeof set.disc_ja, "%s", disc);
-                        snprintf(menu.status, sizeof menu.status, "Restarted in %s",
-                                 set.language == LANG_JA ? "Japanese" : "English");
-                    } else {
-                        set.language = ss.language;
-                        snprintf(menu.status, sizeof menu.status, "%.100s",
-                                 disc ? err : "No Japanese disc chosen");
-                    }
+                case MENU_LANGUAGE:
+                    switch_language(&ss, &set, disc_path, true, win, ren, menu.status, sizeof menu.status);
                     if (!test_mode) settings_save(&set, settings_path);
                     break;
-                }
                 case MENU_VIDEO_CHANGED:
                     SDL_SetWindowFullscreen(win, set.fullscreen);
                     if (!test_mode) settings_save(&set, settings_path);
@@ -628,6 +665,20 @@ int main(int argc, char **argv)
         if (features_dir && pce.frame >= 20100) {
             TLOG("features: lowest health while playing (cheat on): %d of 92; hearts %02X; lives %02X\n",
                  t_min_health, pce.wram[RONDO_HEARTS], pce.wram[RONDO_LIVES]);
+            /* the Language option, without asking: the other language's disc if installed */
+            int from = ss.language;
+            set.language = from == LANG_JA ? LANG_EN : LANG_JA;
+            char status[160];
+            switch_language(&ss, &set, disc_path, false, win, ren, status, sizeof status);
+            if (ss.language != from) {
+                for (int i = 0; i < 900; i++) {
+                    pce.pad = 0;
+                    run_frame();
+                }
+            }
+            TLOG("features: played the %s disc; Language -> %s: %s%s\n", from == LANG_JA ? "Japanese" : "English",
+                 from == LANG_JA ? "English" : "Japanese", status,
+                 ss.language != from ? (pce.wram[RONDO_STATE] == 0x02 ? " (attract mode after 900 frames)" : " (not running?)") : "");
             running = false;
         }
         if (features_dir) continue;   /* run uncapped */

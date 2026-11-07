@@ -55,6 +55,7 @@ void settings_load(Settings *s, const char *path)
         else if (!strcmp(key, "play_maria")) s->play_maria = n != 0;
         else if (!strcmp(key, "language")) s->language = clampi(n, 0, LANG_COUNT - 1);
         else if (!strcmp(key, "disc_ja")) snprintf(s->disc_ja, sizeof s->disc_ja, "%s", val);
+        else if (!strcmp(key, "disc_en")) snprintf(s->disc_en, sizeof s->disc_en, "%s", val);
     }
     fclose(f);
 }
@@ -69,11 +70,11 @@ bool settings_save(const Settings *s, const char *path)
             "skip_cinematics = %d\nrewind = %d\nvolume = %d\nslot = %d\n"
             "cheat_health = %d\ncheat_hearts = %d\ncheat_lives = %d\n"
             "maria_unlocked = %d\nplay_maria = %d\n"
-            "language = %d\ndisc_ja = %s\n",
+            "language = %d\ndisc_ja = %s\ndisc_en = %s\n",
             s->fullscreen, s->widescreen, s->aspect, s->scaling, s->filter, s->sides,
             s->skip, s->rewind, s->volume, s->slot,
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
             s->maria_unlocked, s->play_maria,
-            s->language, s->disc_ja);
+            s->language, s->disc_ja, s->disc_en);
     return fclose(f) == 0;
 }

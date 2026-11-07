@@ -22,10 +22,14 @@ This is the same model as LASRecomp: tools are shipped, the game-specific code i
 
 ## Setup pipeline
 
-1. **Import**: read the zip (CUE with BIN, ISO and/or WAV tracks). Nothing is written until the disc checks out.
+1. **Import**: read the zip (CUE with BIN, IMG, ISO and/or WAV tracks). Nothing is written until the disc checks out.
 2. **Identify**: PC Engine CD signature on the first data track, then a fingerprint of the boot
    program sector to recognise the release (unknown releases are refused or need explicit confirmation).
-3. **Extract** to `game/`: the CUE sheet and the track files it references.
+   The original Japanese disc and the English translation share the boot sector; the language
+   comes from sectors 5-10 of the data track, which the translation changes (`discid_language`).
+3. **Extract** to `game/en/` or `game/ja/` by language, keeping a disc already installed in the
+   other language (a single disc from Setup up to 0.6, straight in `game/`, is moved into its
+   language's folder first).
 4. **Recompile**: the generator (built into Setup, no Python needed) walks the boot loader and the
    95 overlay groups from the main loader table, discovers code in every overlay, and emits C into
    `build/gen/`. Code that cannot be proven statically keeps an interpreter fallback.
@@ -58,11 +62,15 @@ Release folder (412 MB unpacked, 103 MB zipped; Zig is most of it):
 What Setup does (about 40 s; the first build also prepares Zig's C library):
 
 1. import the zip (CUE + tracks, subfolders allowed, CRC-checked, Zip64 aware)
-2. check the disc (PC Engine signature, boot-sector fingerprint); stage in `game.tmp/`, then `game/`
-3. recompile: run the game headless to find its code, emit C into `build/gen/` (docs/recompiler.md)
+2. check the disc (PC Engine signature, boot-sector fingerprint, language); stage in `game.tmp/`,
+   then `game/en/` or `game/ja/`
+3. recompile: run the game headless to find its code, emit C into `build/gen/` (docs/recompiler.md);
+   from the English disc when it is installed (its capture run sees the most code), else the
+   Japanese one. The other disc runs the same code, checked as it goes (99% native)
 4. build: `zig cc` compiles the runtime + generated C into `rondo.exe` (GUI subsystem), copies DLLs
 
-`rondo.exe` uses `game/` next to itself, keeps saves in `%APPDATA%\RondoRecomp`, records code it
+`rondo.exe` uses `game/en/` and `game/ja/` next to itself (the menu's Language switches), keeps
+saves in `%APPDATA%\RondoRecomp` (`-ja` files for Japanese), records code it
 had to interpret in `misses.txt`, and writes `rondo.log` (share of CPU cycles run natively).
 `Rebuild` / `--rebuild` recompiles with those misses.
 

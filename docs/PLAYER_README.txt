@@ -7,7 +7,9 @@ native Windows program. No game files are included: you provide your own disc im
 What you need
 -------------
 A zip of your disc image: the .cue file together with the track files it lists
-(.bin, .iso and/or .wav). The files may be inside a folder in the zip.
+(.bin, .img, .iso and/or .wav). The files may be inside a folder in the zip.
+Either disc works: the original Japanese release (Akumajou Dracula X: Chi no Rondo) or
+the English fan translation. With both, you can switch languages in the game.
 
 How to use it
 -------------
@@ -17,6 +19,8 @@ How to use it
    into native code and builds rondo.exe in this folder. This takes about a minute
    (the first build prepares the bundled C compiler's runtime once).
 4. Click Play. From then on, start rondo.exe directly.
+To add the other language, run Setup again and choose that disc's zip: it is installed
+next to the first (game\en and game\ja) instead of replacing it.
 
 Controls
 --------
@@ -65,7 +69,7 @@ Cheats     Infinite health, infinite hearts (always 99), infinite lives
            (and your save keeps it)
            Play as Maria: every stage is played as Maria, the Prologue too (starts from the
            next stage you enter)
-Language   English or Japanese (needs your Japanese disc image too; see below)
+Language   English or Japanese (each is its own disc; see below)
 
 Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini.
 
@@ -85,12 +89,15 @@ where you let go; up to 30 minutes are kept. Rewinding never changes your saved 
 In-game saves are kept in %APPDATA%\RondoRecomp\RondoRecomp\bram.bin (bram-ja.bin for
 Japanese), save states in %APPDATA%\RondoRecomp\RondoRecomp\states\.
 
-Japanese
---------
-The game's text and subtitles come from the disc image, so Japanese needs the original
-Japanese disc (Akumajou Dracula X: Chi no Rondo). Choose Language: Japanese in the menu and
-select its .cue file once; switching restarts the game in that language. Code that differs
-from the disc Setup recompiled runs on the built-in interpreter (still full speed).
+Japanese and English
+--------------------
+The game's text and subtitles come from the disc image: Japanese is the original disc
+(Akumajou Dracula X: Chi no Rondo), English is the fan translation of it. rondo.exe starts
+with whichever disc Setup installed (the language chosen in the menu, if both are). Menu,
+Language switches and restarts the game; if that language's disc is not installed, it asks
+for its .cue file once and remembers it. The Japanese story text uses the System Card's
+kanji font, which RondoRecomp supplies (Shinonome, a public-domain bitmap font), so no
+System Card image is needed. Both discs run the same recompiled code.
 
 Rebuild
 -------

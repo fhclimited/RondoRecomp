@@ -97,6 +97,22 @@ Bank-aware recursive descent from `$4000` plus both IRQ vectors, after groups 0/
 - System Card calls seen from boot to the save menu: CD_READ, CD_PLAY, CD_FADE, CD_STAT,
   AD_TRANS, AD_PLAY, AD_STOP, AD_STAT (every frame), EX_JOYSNS (every frame), EX_GETFNT,
   BM_READ/WRITE/DELETE/FREE (save setup), EX_SCRSIZ.
+- EX_GETFNT: the Japanese disc's attract-mode story (frames ~577-6276 of the capture script,
+  252 glyphs, 12x12) is drawn from the System Card's kanji font; the English translation uses
+  its own font except for "ＤＲＡＣＵＬＡ" (full-width, ~frame 5976).
+
+## Disc releases
+
+| Release | Layout | Data track 2 | Data track 22 |
+|---|---|---|---|
+| Akumajou Dracula X: Chi no Rondo (JP), e.g. a CloneCD .img/.cue | 22 tracks | original | original |
+| English translation (BIN/ISO/WAV per track, 2012 cue) | 22 tracks | translated (1660 sectors differ) | original (+3300 sectors) |
+| English translation (redump-style BIN per track, 2024) | 22 tracks | the same as above | translated too |
+
+All share the track layout (CD audio is found by absolute position, so it must match) and the
+boot sector (fingerprint `DB4D9415EC501573`); the code differs little (an English-built
+`rondo.exe` runs the Japanese disc 99% native). Game RAM, the widescreen patch sites, run and
+Maria behave the same on both.
 
 ## Game state (work RAM, found by watching the game; `tools/frontend/game.h`)
 

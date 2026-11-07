@@ -202,13 +202,16 @@ int main(int argc, char **argv)
         SDL_LockMutex(mtx);
         if (st == IDLE) {
             SDL_RenderDebugText(ren, 24, 60, "1. Click \"Choose disc zip...\" and pick a zip of your disc image");
-            SDL_RenderDebugText(ren, 24, 72, "   (a .cue file with its .bin/.iso/.wav tracks; a .cue also works).");
-            SDL_RenderDebugText(ren, 24, 88, "2. Setup checks the disc, extracts it, recompiles the game code");
-            SDL_RenderDebugText(ren, 24, 100, "   and builds rondo.exe in this folder. This takes about a minute.");
-            SDL_RenderDebugText(ren, 24, 116, "3. Click Play.");
-            SDL_RenderDebugText(ren, 24, 140, "Rebuild: recompile again, including code rondo.exe recorded");
-            SDL_RenderDebugText(ren, 24, 152, "while you played (misses.txt).");
-            SDL_RenderDebugText(ren, 24, 176, "No game files are included with RondoRecomp.");
+            SDL_RenderDebugText(ren, 24, 72, "   (a .cue file with its .bin/.img/.iso/.wav tracks; a .cue also works).");
+            SDL_RenderDebugText(ren, 24, 84, "   The original Japanese disc or the English translation: either works.");
+            SDL_RenderDebugText(ren, 24, 100, "2. Setup checks the disc, extracts it, recompiles the game code");
+            SDL_RenderDebugText(ren, 24, 112, "   and builds rondo.exe in this folder. This takes about a minute.");
+            SDL_RenderDebugText(ren, 24, 128, "3. Click Play.");
+            SDL_RenderDebugText(ren, 24, 152, "Both languages: choose the other disc's zip afterwards; it is added");
+            SDL_RenderDebugText(ren, 24, 164, "next to the first, and the game's menu switches (Language).");
+            SDL_RenderDebugText(ren, 24, 188, "Rebuild: recompile again, including code rondo.exe recorded");
+            SDL_RenderDebugText(ren, 24, 200, "while you played (misses.txt).");
+            SDL_RenderDebugText(ren, 24, 224, "No game files are included with RondoRecomp.");
         } else {
             int first = n_lines > 30 ? n_lines - 30 : 0;
             float y = 52;

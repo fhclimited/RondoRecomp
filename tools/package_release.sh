@@ -5,7 +5,7 @@
 # usage: tools/package_release.sh [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VER=${1:-0.6.1}
+VER=${1:-0.7}
 B=build
 LIC=/c/msys64/ucrt64/share/licenses
 
@@ -32,6 +32,9 @@ cp docs/PLAYER_README.txt "$OUT/README.txt"
     echo "    https://zlib.net"
     echo "GNU libiconv (libiconv-2.dll, used by SDL3.dll): LGPL 2.1 or later"
     echo "    https://www.gnu.org/software/libiconv - source: https://packages.msys2.org"
+    echo "Shinonome Gothic 12 and 16 dot bitmap fonts (sdk/src/runtime/pce/kanji_font.c, the"
+    echo "Japanese text of the original disc): public domain, The Electronic Font Open Laboratory"
+    echo "    http://openlab.jp/efont/shinonome/"
     echo
     echo "The license texts follow."
     for f in "$LIC/SDL3/LICENSE.txt" "$LIC/zlib/LICENSE" "$LIC/libiconv/COPYING.LIB"; do

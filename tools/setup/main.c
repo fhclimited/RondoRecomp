@@ -28,7 +28,7 @@
 #include "../recomp/gen.h"
 #include "zip.h"
 
-#define SETUP_VERSION "0.6.1"
+#define SETUP_VERSION "0.7"
 
 /* ---- output hooks (stdout for the command line; the GUI installs its own) ------------- */
 
@@ -361,6 +361,73 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     return true;
 }
 
+/* ---- languages ------------------------------------------------------------------ */
+
+/* Each disc is kept in game/en or game/ja, by the language of its text, so a player can
+ * install both and switch in the game's menu. */
+static const char *lang_dir(DiscLanguage l) { return l == DISC_LANG_JA ? "ja" : "en"; }
+static const char *lang_name(DiscLanguage l)
+{
+    return l == DISC_LANG_JA ? "Japanese (the original release)" : "English (translated)";
+}
+
+/* The .cue of the disc installed in game/<sub>, if there is one. */
+static bool installed_cue(const char *game, const char *sub, char *out, size_t n)
+{
+    char dir[1100];
+    join(dir, sizeof dir, game, sub);
+    int count = 0;
+    char **cues = SDL_GlobDirectory(dir, "*.cue", SDL_GLOB_CASEINSENSITIVE, &count);
+    bool ok = false;
+    for (int i = 0; cues && i < count && !ok; i++) {
+        if (strchr(cues[i], '/') || strchr(cues[i], '\\')) continue;     /* this folder only */
+        join(out, n, dir, cues[i]);
+        ok = true;
+    }
+    SDL_free(cues);
+    return ok;
+}
+
+typedef struct { const char *from, *to; bool ok; } MoveCtx;
+
+static SDL_EnumerationResult SDLCALL move_visit(void *userdata, const char *dir, const char *name)
+{
+    MoveCtx *m = userdata;
+    char src[1100], dst[1100];
+    join(src, sizeof src, dir, name);
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(src, &info) || info.type != SDL_PATHTYPE_FILE) return SDL_ENUM_CONTINUE;
+    join(dst, sizeof dst, m->to, name);
+    if (!SDL_RenamePath(src, dst)) m->ok = false;
+    return SDL_ENUM_CONTINUE;
+}
+
+/* Setup up to 0.6 extracted its one disc straight into game/: move those files into the
+ * disc's language folder, so a second language can be added next to it. */
+static bool migrate_single_disc(const char *game)
+{
+    char cue[1200];
+    if (!installed_cue(game, "", cue, sizeof cue)) return true;
+    DiscLanguage l = discid_language(cue);
+    if (l == DISC_LANG_UNKNOWN) l = DISC_LANG_EN;
+    char to[1100];
+    join(to, sizeof to, game, lang_dir(l));
+    remove_tree(to);
+    if (!SDL_CreateDirectory(to)) return false;
+    MoveCtx m = {game, to, true};
+    SDL_EnumerateDirectory(game, move_visit, &m);
+    say("  moved the %s disc installed earlier to %s\n", l == DISC_LANG_JA ? "Japanese" : "English", to);
+    return m.ok;
+}
+
+/* The disc the game code is recompiled from: the English one if installed (its capture run
+ * sees the most code), else the Japanese one. The other runs the same code, checked as it
+ * goes (99% native). */
+static bool code_disc(const char *game, char *out, size_t n)
+{
+    return installed_cue(game, "en", out, n) || installed_cue(game, "ja", out, n) || installed_cue(game, "", out, n);
+}
+
 /* ---- main --------------------------------------------------------------------- */
 
 static int fail(const char *step)
@@ -407,11 +474,8 @@ int setup_main(int argc, char **argv)
 
     if (rebuild) {
         say("RondoRecomp Setup " SETUP_VERSION " (rebuild)\n\n[1/4] Using the extracted disc in %s\n", game);
-        int count = 0;
-        char **cues = SDL_GlobDirectory(game, "*.cue", SDL_GLOB_CASEINSENSITIVE, &count);
-        if (cues && count > 0) join(game_cue, sizeof game_cue, game, cues[0]);
-        SDL_free(cues);
-        if (!game_cue[0]) { snprintf(g_err, sizeof g_err, "no extracted disc in %s; run Setup with your zip first", game); return fail("rebuilding"); }
+        if (!migrate_single_disc(game)) { snprintf(g_err, sizeof g_err, "cannot reorganise %s", game); return fail("rebuilding"); }
+        if (!code_disc(game, game_cue, sizeof game_cue)) { snprintf(g_err, sizeof g_err, "no extracted disc in %s; run Setup with your zip first", game); return fail("rebuilding"); }
         say("\n[2/4] Checking the disc\n");
         kind = discid_identify(game_cue, &fp);
         if (kind == DISC_INVALID) { snprintf(g_err, sizeof g_err, "%s is not a readable PC Engine CD image", game_cue); return fail("checking the disc"); }
@@ -451,17 +515,32 @@ int setup_main(int argc, char **argv)
                        "use --allow-unknown to try it anyway", (unsigned long long)fp);
             return fail("checking the disc");
         }
-        say("  %s (fingerprint %016llX)\n", kind == DISC_RONDO ? "Castlevania: Rondo of Blood" : "unknown release",
-               (unsigned long long)fp);
-        remove_tree(game);
-        if (!SDL_RenamePath(stage, game)) {
-            snprintf(g_err, sizeof g_err, "cannot move %s to %s: %s", stage, game, SDL_GetError());
+        DiscLanguage lang = discid_language(cue);
+        if (lang == DISC_LANG_UNKNOWN) lang = DISC_LANG_EN;
+        say("  %s, %s (fingerprint %016llX)\n", kind == DISC_RONDO ? "Castlevania: Rondo of Blood" : "unknown release",
+            lang_name(lang), (unsigned long long)fp);
+        SDL_CreateDirectory(game);
+        if (!migrate_single_disc(game)) {
+            remove_tree(stage);
+            snprintf(g_err, sizeof g_err, "cannot reorganise %s", game);
             return fail("extracting");
         }
-        say("  extracted to %s\n", game);
-
-
-        join(game_cue, sizeof game_cue, game, basename_of(cue));
+        char dest[1200];
+        join(dest, sizeof dest, game, lang_dir(lang));
+        remove_tree(dest);
+        if (!SDL_RenamePath(stage, dest)) {
+            snprintf(g_err, sizeof g_err, "cannot move %s to %s: %s", stage, dest, SDL_GetError());
+            return fail("extracting");
+        }
+        say("  extracted to %s\n", dest);
+        char other[1200];
+        DiscLanguage ol = lang == DISC_LANG_JA ? DISC_LANG_EN : DISC_LANG_JA;
+        if (installed_cue(game, lang_dir(ol), other, sizeof other))
+            say("  the %s disc installed earlier is kept: both languages are available (the game's menu,\n"
+                "  Language)\n", ol == DISC_LANG_JA ? "Japanese" : "English");
+        else
+            say("  to have %s as well, run Setup again with that disc's zip\n", ol == DISC_LANG_JA ? "Japanese" : "English");
+        code_disc(game, game_cue, sizeof game_cue);
     }
 
     say("\n[3/4] Recompiling the game code\n");

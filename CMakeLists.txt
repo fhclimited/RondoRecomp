@@ -20,6 +20,7 @@ add_library(pce STATIC
   runtime/pce/disc.c
   runtime/pce/discid.c
   runtime/pce/bios_hle.c
+  runtime/pce/kanji_font.c
   runtime/pce/bram.c
   runtime/pce/sound.c
   runtime/pce/state.c

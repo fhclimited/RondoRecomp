@@ -12,3 +12,14 @@ typedef enum {
 /* Checks the PC Engine CD signature, then fingerprints the boot program sector.
  * If fingerprint is non-NULL it receives the fingerprint (0 when unreadable). */
 DiscKind discid_identify(const char *cue_path, uint64_t *fingerprint);
+
+typedef enum {
+    DISC_LANG_UNKNOWN,  /* unreadable */
+    DISC_LANG_EN,       /* a translated disc: the English fan translation (any disc whose text
+                         * differs from the original's) */
+    DISC_LANG_JA,       /* the original Japanese release, Akumajou Dracula X: Chi no Rondo */
+} DiscLanguage;
+
+/* The original Japanese disc and the English translation share the boot sector; the
+ * translation changes the data track from its sixth sector on, which this checks. */
+DiscLanguage discid_language(const char *cue_path);

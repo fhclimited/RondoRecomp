@@ -6,6 +6,12 @@ work/
 *.cue
 *.chd
 *.pce
+*.zip
+*.rar
+*.7z
+*.img
+*.ccd
+*.sub
 
 # Build output
 build/

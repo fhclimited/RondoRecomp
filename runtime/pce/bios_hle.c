@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "kanji_font.h"
 #include "pce.h"
 
 static const char *const names[PCE_BIOS_ENTRIES] = {
@@ -345,6 +346,45 @@ static void mul_result(Pce *p, uint32_t v)
     DL(p) = (uint8_t)(v >> 16); DH(p) = (uint8_t)(v >> 24);
 }
 
+/* EX_GETFNT: _ax = Shift-JIS code, _bx = where the 32-byte glyph goes, _dh bit 0 set: 12x12,
+ * else 16x16. The glyph is 16 rows of two bytes, high bit leftmost; a 12x12 one fills the
+ * top-left corner. A = 0, or 1 for a code the System Card has no glyph for (it has JIS rows
+ * 0x21-0x27 and the level-1 kanji, 0x30-0x4F). Players do not supply a System Card, so the
+ * glyphs come from the bundled Shinonome font (kanji_font.c). The Japanese game draws its
+ * attract-mode story with this; the English one a few words. */
+static int ex_getfnt(Pce *p)
+{
+    int h = AH(p) - 0x81, a = AL(p) - 0x40, cell = -1;
+    if (h >= 0 && h < 0x6F && !(h >= 0x1F && h < 0x3F) && a >= 0 && a < 0xBD && a != 0x3F) {
+        if (h >= 0x3F) h -= 0x40;
+        int row = h * 2 + 0x21, col;
+        if (a < 0x3F) a++;
+        if (a < 0x5F) col = a + 0x20;
+        else { row++; col = a - 0x3E; }
+        cell = kanji_cell(row, col);
+    }
+    if (cell < 0) {
+        p->cpu.a = 1;
+        return 200;
+    }
+    uint8_t g[32] = {0};
+    if (DH(p) & 1) {
+        const uint8_t *d = kanji_font12[cell];
+        for (int k = 0; k < 6; k++, d += 3) {
+            g[k * 4 + 0] = d[0];
+            g[k * 4 + 1] = (uint8_t)(d[1] & 0xF0);
+            g[k * 4 + 2] = (uint8_t)(d[1] << 4 | d[2] >> 4);
+            g[k * 4 + 3] = (uint8_t)(d[2] << 4);
+        }
+    } else {
+        memcpy(g, kanji_font16[cell], 32);
+    }
+    uint16_t dst = (uint16_t)(BL(p) | BH(p) << 8);
+    for (int i = 0; i < 32; i++) pce_write8(p, (uint16_t)(dst + i), g[i]);
+    p->cpu.a = 0;
+    return 1200;
+}
+
 int bios_hle_call(Pce *p, int idx)
 {
     if (idx < 0 || idx >= PCE_BIOS_ENTRIES) return 10;
@@ -433,6 +473,7 @@ int bios_hle_call(Pce *p, int idx)
     case EX_SCRMOD: return scr_mode(p);
     case EX_SATCLR: return 100;     /* clears the BIOS's RAM sprite table, unused by this game */
     case EX_JOYSNS: return joysns(p);
+    case EX_GETFNT: return ex_getfnt(p);
 
     case MA_MUL8U: mul_result(p, (uint32_t)AL(p) * BL(p)); return 60;
     case MA_MUL8S: mul_result(p, (uint32_t)(int32_t)((int8_t)AL(p) * (int8_t)BL(p))); return 60;
