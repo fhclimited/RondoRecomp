@@ -168,7 +168,16 @@ Forcing $9F = 1 before Stage 0 loads plays the Prologue as Maria.
 - The sprite builder writes up to 64 sprites straight to the VDC and drops any piece whose X is
   outside the 256-pixel screen.
 - The Stage 0 carriage chase does not scroll the camera; its scenery layers loop round the
-  whole 512-pixel map, part of which is shared between layers.
+  whole 512-pixel map, part of which is shared between layers. Its raster bands (rows of the
+  picture, X scroll): sky 0-62 (+1 every few frames), far trees 63-78 (+1), trees 79-126
+  (+4), carriage 127-182, grass 183-224 (+8). For the first ~400 frames the carriage
+  (background) is parked in the band's map at scroll 256, just off both edges of the 256
+  visible pixels, and its horses (sprite objects 3B, 4B-4E, 51-53 at screen X -224..-72,
+  static) just off the left, while the trees (sprite objects, 16x64 pieces) go by; then the
+  band scrolls and the carriage drives in from the left.
+- The sprite builder (72:8000) keeps the object slot it is drawing in zp `$D9`; pieces with
+  X + 32 negative are dropped at 72:8127, those with X + 32 below a size-dependent bound
+  ($81A1,X) at 72:813A.
 
 ## Open questions
 

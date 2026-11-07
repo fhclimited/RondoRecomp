@@ -92,7 +92,15 @@ items, with the score display moved to the left edge. Up to 21:9 (about 112 extr
 pixels each side) is covered; wider screens get the rest beside the picture.
 Rooms the camera does not scroll through sideways (vertical shafts, boss rooms) keep the
 original 4:3 picture, as do cinematics and menus. Beyond the walls of a room is black.
-Turning widescreen on takes effect from the next room.
+Turning widescreen on takes effect from the next room. Where the game parks something just
+off its 4:3 screen to bring it on later (the Prologue's carriage waits off the left edge
+while the forest goes by), it stays out of sight until it comes in.
+
+Your own icon
+-------------
+RondoRecomp includes no game artwork. To give rondo.exe an icon, put an image named
+icon.png (up to 256 x 256 pixels) or icon.ico next to "RondoRecomp Setup.exe" and run
+Setup (or Rebuild); it is built into rondo.exe and shows on its window and taskbar button.
 
 Rewind plays the game backwards while held (faster after 3 seconds) and continues from
 where you let go; up to 30 minutes are kept. Rewinding never changes your saved game.

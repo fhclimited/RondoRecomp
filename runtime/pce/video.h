@@ -70,3 +70,20 @@ uint8_t vdc_read(Vdc *d, uint16_t off);
 void vdc_line_start(Vdc *d, int line);
 /* Called after the CPU has run the line: renders it if it is an active display line. */
 void vdc_line_end(Vdc *d, const Vce *vce, int line);
+
+/* Host-side rendering aids for widescreen, kept outside the machine state (save states are
+ * unchanged; one picture is drawn at a time per process):
+ * - vdc_row_scroll: the background X scroll (BXR) each displayed row of the last frame was
+ *   drawn with; raster splits give bands of rows their own scroll.
+ * - vdc_row_bg_blank: rows of the last frame whose background showed nothing (colour 0)
+ *   across the original 256 pixels; vdc_row_bg_edge: rows of a widened picture whose
+ *   background showed something at its left edge (first 4 pixels).
+ * - vdc_set_row_clip: per displayed row, where its background is cut off beyond the
+ *   original 256 pixels, as beyond a room's walls (sprites or black there): VDC_CLIP_BOTH
+ *   both sides, VDC_CLIP_RIGHT the right side only, 0 neither. NULL for none; the array
+ *   (PCE_FB_MAX_H bytes) must stay valid while frames are drawn. */
+enum { VDC_CLIP_BOTH = 1, VDC_CLIP_RIGHT = 2 };
+const uint16_t *vdc_row_scroll(void);
+const uint8_t *vdc_row_bg_blank(void);
+const uint8_t *vdc_row_bg_edge(void);
+void vdc_set_row_clip(const uint8_t *rows);

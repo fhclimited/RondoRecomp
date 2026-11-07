@@ -97,7 +97,7 @@ static const Patch patches[] = {
     /* Sprite building (bank $72, 72:8000): each sprite piece is dropped unless its X
      * (screen + 32) is 0..$11F; let pieces through from -E to $11F + E. */
     {"sprites drawn up to 112 px right of the screen", 0x72, 0x0133, 1, {0x20}, {0x20 + E}},
-    {"sprites with X 0..15 drawn", 0x72, 0x013A, 3, {0xDD, 0xA1, 0x81}, {0xC9, 0x00, 0xEA}},
+    {"sprites with X 0..15 drawn (unless parked: see $FE62)", 0x72, 0x013A, 3, {0xDD, 0xA1, 0x81}, {0x4C, 0x62, 0xFE}},
     {"negative sprite X goes to the check below", 0x72, 0x0127, 3, {0x4C, 0x8C, 0x81}, {0x4C, 0x00, 0xFE}},
     /* ...in free space in our own bank $00 (RTS filler; mapped at $E000 throughout):
      * A = X high byte (negative). Keep the piece if it is $FF and the low byte >= -E. */
@@ -108,9 +108,43 @@ static const Patch patches[] = {
       0xA5, 0x05,               /* LDA <$05          */
       0xC9, 0x100 - E,          /* CMP #-E           */
       0x90, 0x03,               /* BCC drop          */
+      0x4C, 0x50, 0xFE,         /* JMP $FE50         */
+      0x4C, 0x8C, 0x81}},       /* drop: JMP $818C   */
+    /* ...then the piece's object (slot in zp $D9 while the builder draws it) is dropped if
+     * the parked-object table (PARKED_TABLE, written before every frame) marks it: something
+     * the game parks just off the left of its 256 pixels, such as the Prologue's waiting
+     * horses, stays out of sight in the wider picture too. */
+    {"objects parked off the left not drawn", 0x00, 0x1E50, 17,
+     {0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60},
+     {0xDA,                     /* PHX               */
+      0xA6, 0xD9,               /* LDX <$D9  (slot)  */
+      0xBD, 0x80, 0xFE,         /* LDA $FE80,X       */
+      0xFA,                     /* PLX               */
+      0xC9, 0x00,               /* CMP #0            */
+      0xD0, 0x03,               /* BNE drop          */
       0x4C, 0x3F, 0x81,         /* JMP $813F (keep)  */
       0x4C, 0x8C, 0x81}},       /* drop: JMP $818C   */
+    /* Pieces up to 32 px left of the screen (X + 32 = 0..31, A = that, X = the size index):
+     * kept, except for a parked object, which gets the game's own lower bound again. */
+    {"pieces just left of the screen: parked objects culled as before", 0x00, 0x1E62, 27,
+     {0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+      0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60},
+     {0x48,                     /* PHA               */
+      0xDA,                     /* PHX               */
+      0xA6, 0xD9,               /* LDX <$D9  (slot)  */
+      0xBD, 0x80, 0xFE,         /* LDA $FE80,X       */
+      0xFA,                     /* PLX               */
+      0xC9, 0x00,               /* CMP #0            */
+      0xF0, 0x09,               /* BEQ keep          */
+      0x68,                     /* PLA               */
+      0xDD, 0xA1, 0x81,         /* CMP $81A1,X       */
+      0x90, 0x06,               /* BCC drop          */
+      0x4C, 0x3F, 0x81,         /* go: JMP $813F     */
+      0x68,                     /* keep: PLA         */
+      0x80, 0xFA,               /* BRA go            */
+      0x4C, 0x8C, 0x81}},       /* drop: JMP $818C   */
 };
+#define PARKED_TABLE 0x1E80   /* bank $00 offset ($FE80): a byte per object slot, 1 = parked */
 #define N_PATCHES (int)(sizeof patches / sizeof patches[0])
 #define N_WORLD 14         /* patches[0..13] change the game world, the rest only drawing */
 #define WORLD_PATCHES ((1u << N_WORLD) - 1)
@@ -168,6 +202,7 @@ int wide_extent(double window_aspect, double picture_aspect)
 #define OBJ_XH 0x0B70
 #define OBJ_TYPE 0x0A10
 #define HUD_SLOT 0x57        /* the HUD (health, hearts, score): type 5, screen X 8 */
+#define OBJ_FRAME 0x0A68     /* sprite frame drawn; 0 = none */
 
 /* Some objects are generators fixed to the screen at the old spawn edge (e.g. Stage 1's
  * skeleton generator sits at screen X 320 and drops skeletons there). Move ones at
@@ -288,6 +323,59 @@ void wide_frame(Wide *w, Pce *p)
         show = false;
     }
     if (!show) ext = 0;
+
+    /* In a scene drawn wide over its looping scenery, a band of rows that stands still with
+     * nothing in the original 256 pixels holds something parked in the part of its 512-pixel
+     * map those pixels do not show: the Prologue's carriage (background) waits there just
+     * off both edges, its horses (sprite objects) just off the left, while the forest
+     * scrolls past. Such a band shows only the original 256 pixels, and objects standing
+     * still off the left are not drawn (the HUD excepted). When the band moves again, the
+     * parked thing is coming in from the left: the left side is shown, the right (where the
+     * map wraps round to its rear) is not, until it has come in clear of the picture's left
+     * edge (on the widest screens the picture shows 480 of the map's 512 pixels, so what is
+     * still off the left wraps round into the right side). Decided per band (rows drawn with
+     * the same scroll) from the last frame's rows. */
+    const uint16_t *rs = vdc_row_scroll();
+    const uint8_t *blank = vdc_row_bg_blank();
+    const uint8_t *edge = vdc_row_bg_edge();
+    int rows = p->vdc.fb_h < PCE_FB_MAX_H ? p->vdc.fb_h : PCE_FB_MAX_H;
+    bool clip_parked = ext && !scrolls, any_parked = false;
+    for (int y = 0; y < PCE_FB_MAX_H; y++) {
+        bool same = y < rows && rs[y] == w->row_x[y];
+        w->row_still[y] = same ? (uint8_t)(w->row_still[y] < 255 ? w->row_still[y] + 1 : 255) : 0;
+    }
+    for (int y0 = 0; y0 < PCE_FB_MAX_H;) {
+        int y1 = y0 + 1;
+        /* same scroll now and last frame: two bands whose scrolls just happen to meet (the
+         * trees passing the parked carriage's) stay apart */
+        while (y0 < rows && y1 < rows && rs[y1] == rs[y0] && w->row_x[y1] == w->row_x[y0]) y1++;
+        bool all_blank = y0 < rows, all_still = true, at_edge = false;
+        uint8_t was = 0;
+        for (int y = y0; y < y1; y++) {
+            all_blank &= y < rows && blank[y];
+            all_still &= w->row_still[y] >= PARKED_FRAMES;
+            at_edge |= y < rows && edge[y];
+            if (w->row_clip[y] > was) was = w->row_clip[y];
+        }
+        uint8_t mode = 0;
+        if (clip_parked && all_blank && all_still) mode = VDC_CLIP_BOTH;
+        else if (clip_parked && was && (all_blank || at_edge)) mode = VDC_CLIP_RIGHT;
+        for (int y = y0; y < y1; y++) w->row_clip[y] = mode;
+        any_parked |= mode == VDC_CLIP_BOTH;
+        y0 = y1;
+    }
+    for (int y = 0; y < rows; y++) w->row_x[y] = rs[y];
+    vdc_set_row_clip(w->row_clip);
+
+    /* objects standing still off the left while a band is parked */
+    uint8_t *table = p->page[0x00] ? p->page[0x00] + PARKED_TABLE : NULL;
+    for (int i = 0; i < OBJ_SLOTS; i++) {
+        int16_t x = (int16_t)(r[OBJ_XL + i] | r[OBJ_XH + i] << 8);
+        w->obj_still[i] = x == w->obj_x[i] ? (uint8_t)(w->obj_still[i] < 255 ? w->obj_still[i] + 1 : 255) : 0;
+        w->obj_x[i] = x;
+        bool parked = any_parked && i != HUD_SLOT && r[OBJ_FRAME + i] && x < 0 && w->obj_still[i] >= PARKED_FRAMES;
+        if (table) table[i] = parked;
+    }
 
     p->vdc.wide = ext;
     if (scrolls) {

@@ -37,6 +37,10 @@ This is the same model as LASRecomp: tools are shipped, the game-specific code i
    `rondo.exe`. Builds are resumable: generated files that are already compiled are skipped.
 6. **Done**: `rondo.exe` next to `game/`; Setup offers to launch it.
 
+An `icon.ico` or `icon.png` (up to 256 x 256) the player puts next to Setup is built into
+`rondo.exe` as its icon (resource 1, compiled by `zig cc` from `build/rondo.rc`; a PNG goes
+into an .ico as it is). None is shipped: no game artwork is included.
+
 The generated C and the extracted data stay on the player's PC and are never redistributed.
 
 ## Current state

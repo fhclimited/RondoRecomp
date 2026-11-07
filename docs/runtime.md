@@ -179,6 +179,19 @@ background map may be shared between layers (the Stage 0 carriage chase is drawn
 no changes: its scenery layers loop round the whole map). Areas beyond a room's walls are
 drawn black (`vdc.wide_x0/x1`). The sprite changes follow each frame's wide/4:3 choice.
 
+Parked things (the Prologue's carriage): in a one-screen room drawn wide over its looping
+scenery, a band of rows (rows drawn with the same X scroll in this frame and the last; the
+renderer records each row's scroll, `vdc_row_scroll`, outside the machine state) that stands
+still for 20 frames with nothing in its original 256 pixels holds something the game parked
+in the part of its 512-pixel map those pixels do not show. That band is cut to the original
+256 pixels (`vdc_set_row_clip`, both sides), and objects standing still off the left (screen
+X < 0, unchanged for 20 frames, not the HUD) are marked in a table in bank `$00` (`$FE80` +
+slot) that the sprite builder's checks consult: their pieces left of the screen are
+dropped, as the 4:3 game drops them. When the band moves again the thing is coming in from
+the left: only the right side is cut (where the map wraps round to its rear), until the
+band's background has come in clear of the picture's left edge (at 21:9 the picture shows
+480 of the map's 512 pixels).
+
 Start screen (`menu.c` page `PAGE_START`, the in-game menu's root swapped for one with Play
 at the top; the option pages return to whichever root opened them): shown when rondo.exe
 starts unless `--play` or the Start screen option is off. The game boots behind it and runs

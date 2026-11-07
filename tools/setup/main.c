@@ -28,7 +28,7 @@
 #include "../recomp/gen.h"
 #include "zip.h"
 
-#define SETUP_VERSION "0.8.2"
+#define SETUP_VERSION "0.8.3"
 
 /* ---- output hooks (stdout for the command line; the GUI installs its own) ------------- */
 
@@ -278,6 +278,61 @@ static bool run(const char *const *args)
     return true;
 }
 
+/* The player's own icon for rondo.exe: icon.ico, else icon.png, next to Setup (RondoRecomp
+ * ships none: no game artwork is included). A PNG goes into an .ico as it is (Windows takes
+ * PNG images in icons). Writes build/rondo.rc for the compiler; false if there is no icon. */
+static bool icon_resource(const char *out, char *rc_path, size_t n)
+{
+    char ico[1100], png[1100], made[1100];
+    join(ico, sizeof ico, out, "icon.ico");
+    join(png, sizeof png, out, "icon.png");
+    const char *use = NULL;
+    if (SDL_GetPathInfo(ico, NULL)) {
+        use = ico;
+    } else if (SDL_GetPathInfo(png, NULL)) {
+        size_t len = 0;
+        uint8_t *data = SDL_LoadFile(png, &len);
+        if (!data || len < 24 || memcmp(data, "\x89PNG", 4)) {
+            say("  icon.png is not a PNG image; rondo.exe keeps the default icon\n");
+            SDL_free(data);
+            return false;
+        }
+        uint32_t w = (uint32_t)data[16] << 24 | data[17] << 16 | data[18] << 8 | data[19];
+        uint32_t h = (uint32_t)data[20] << 24 | data[21] << 16 | data[22] << 8 | data[23];
+        if (w == 0 || h == 0 || w > 256 || h > 256) {
+            say("  icon.png must be at most 256 x 256 pixels; rondo.exe keeps the default icon\n");
+            SDL_free(data);
+            return false;
+        }
+        uint8_t head[22] = {0, 0, 1, 0, 1, 0,                         /* ICONDIR: an icon, one image */
+                            (uint8_t)(w & 255), (uint8_t)(h & 255), 0, 0, 1, 0, 32, 0,
+                            (uint8_t)len, (uint8_t)(len >> 8), (uint8_t)(len >> 16), (uint8_t)(len >> 24),
+                            22, 0, 0, 0};
+        join(made, sizeof made, out, "build/icon.ico");
+        SDL_IOStream *f = SDL_IOFromFile(made, "wb");
+        bool ok = f && SDL_WriteIO(f, head, sizeof head) == sizeof head && SDL_WriteIO(f, data, len) == len;
+        if (f) SDL_CloseIO(f);
+        SDL_free(data);
+        if (!ok) return false;
+        use = made;
+    } else {
+        return false;
+    }
+    char quoted[1100];
+    snprintf(quoted, sizeof quoted, "%s", use);
+    for (char *c = quoted; *c; c++) if (*c == '\\') *c = '/';
+    join(rc_path, n, out, "build/rondo.rc");
+#ifdef _WIN32
+    /* zig's resource compiler cannot open a path that mixes \ and / */
+    for (char *c = rc_path; *c; c++) if (*c == '/') *c = '\\';
+#endif
+    char text[1300];
+    snprintf(text, sizeof text, "1 ICON \"%s\"\n", quoted);
+    if (!SDL_SaveFile(rc_path, text, strlen(text))) return false;
+    say("  rondo.exe gets your icon (%s)\n", use == ico ? "icon.ico" : "icon.png");
+    return true;
+}
+
 static bool build(const char *sdk, const char *zig, const char *out, const char *gen_dir)
 {
     /* the list of runtime sources ships with the SDK */
@@ -324,6 +379,15 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
         args[n++] = storage[s++];
     }
     SDL_free(gen_files);
+    /* the icon: compiled to a .res first (zig cc cannot build an .rc together with -s) */
+    static char rc[1100], res[1100];
+    if (icon_resource(out, rc, sizeof rc)) {
+        snprintf(res, sizeof res, "%s", rc);
+        snprintf(res + strlen(res) - 3, 5, ".res");
+        const char *rc_args[] = {zig, "rc", "-fo", res, rc, NULL};
+        if (run(rc_args)) args[n++] = res;
+        else say("  the icon could not be built (%s); rondo.exe keeps the default icon\n", g_err);
+    }
     args[n++] = opt_l;
     args[n++] = "-Wl,--subsystem,windows";   /* GUI program: zig cc ignores -mwindows */
     args[n++] = "-o";

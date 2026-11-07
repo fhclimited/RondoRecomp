@@ -172,6 +172,7 @@ int main(int argc, char **argv)
     int n_run = 0;
     long wrep_at[8]; /* --wide-report FRAME: which widescreen game changes are in */
     int n_wrep = 0;
+    long rows_from = -1, rows_to = -1;   /* --row-scroll A:B: each frame's bands of rows by X scroll */
     long sat_at[8]; /* --dump-sat FRAME: print the sprite table after that frame */
     int n_sat = 0;
     for (int i = 2; i < argc; i++) {
@@ -240,6 +241,7 @@ int main(int argc, char **argv)
             if (sscanf(argv[++i], "%ld:%ld", &run_at[n_run][0], &run_at[n_run][1]) == 2) n_run++;
         }
         else if (!strcmp(argv[i], "--wide-report") && i + 1 < argc && n_wrep < 8) wrep_at[n_wrep++] = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--row-scroll") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld", &rows_from, &rows_to);
         else if (!strcmp(argv[i], "--dump-sat") && i + 1 < argc && n_sat < 8) sat_at[n_sat++] = atol(argv[++i]);
         else if (!strcmp(argv[i], "--vram-watch") && i + 1 < argc) {
             if (sscanf(argv[++i], "%x:%x", &vw_lo, &vw_hi) == 2) vw_count = calloc(1u << 24, sizeof *vw_count);
@@ -366,6 +368,17 @@ int main(int argc, char **argv)
                 FILE *df = fopen(dump[i].path, "wb");
                 if (df) { fwrite(pce.wram, 1, 0x2000, df); fclose(df); }
             }
+        if (f + 1 >= rows_from && f + 1 <= rows_to) {
+            const uint16_t *rs = vdc_row_scroll();
+            printf("rows %ld:", f + 1);
+            for (int y = 0; y < pce.vdc.fb_h;) {
+                int e = y;
+                while (e + 1 < pce.vdc.fb_h && rs[e + 1] == rs[y]) e++;
+                printf(" %d-%d=%d%s", y, e, rs[y], wd.row_clip[y] == 1 ? "P" : wd.row_clip[y] == 2 ? "E" : "");
+                y = e + 1;
+            }
+            printf("\n");
+        }
         for (int i = 0; i < n_wrep; i++)
             if (wrep_at[i] == f + 1) {
                 static char buf[4096];

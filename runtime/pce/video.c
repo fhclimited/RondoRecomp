@@ -3,6 +3,7 @@
 
 #include <string.h>
 
+
 /* VDC register numbers */
 enum {
     R_MAWR = 0x00, R_MARR = 0x01, R_VWR = 0x02, R_CR = 0x05, R_RCR = 0x06,
@@ -215,6 +216,15 @@ void vdc_line_start(Vdc *d, int line)
 
 /* ---- rendering ------------------------------------------------------------- */
 
+static uint16_t row_scroll[PCE_FB_MAX_H];
+static uint8_t row_bg_blank[PCE_FB_MAX_H], row_bg_edge[PCE_FB_MAX_H];
+static const uint8_t *row_clip;
+
+const uint16_t *vdc_row_scroll(void) { return row_scroll; }
+const uint8_t *vdc_row_bg_blank(void) { return row_bg_blank; }
+const uint8_t *vdc_row_bg_edge(void) { return row_bg_edge; }
+void vdc_set_row_clip(const uint8_t *rows) { row_clip = rows; }
+
 /* x0: screen x of out[0] (negative in widescreen) */
 static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
 {
@@ -312,8 +322,15 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
     memset(sp, 0, sizeof sp);
     uint16_t cr = d->reg[R_CR];
     int x0 = -d->fb_wide;
+    row_scroll[row] = d->reg[R_BXR] & 0x3FF;
     if (cr & 0x80) render_bg(d, y, x0, w, bg);
     if (cr & 0x40) render_sprites(d, row, x0, w, sp);
+    {
+        bool any = false;
+        for (int x = d->fb_wide; x < d->fb_wide + 256 && x < w && !any; x++) any = bg[x] != 0;
+        row_bg_blank[row] = !any;
+        row_bg_edge[row] = d->fb_wide && w >= 4 && (bg[0] | bg[1] | bg[2] | bg[3]) != 0;
+    }
 
     uint32_t *dst = &d->fb[row * PCE_FB_MAX_W];
     for (int x = 0; x < w; x++) {
@@ -323,8 +340,13 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
         else dst[x] = vce->argb[0];
     }
     if (d->fb_wide) {
-        /* beyond the room's walls: black behind the sprites */
+        /* beyond the room's walls (or the original 256 pixels on a clipped row): black
+         * behind the sprites */
         int x0 = d->wide_x0 < 0 ? 0 : d->wide_x0, x1 = d->wide_x1 > w ? w : d->wide_x1;
+        if (row_clip && row_clip[row]) {
+            if (row_clip[row] == VDC_CLIP_BOTH && x0 < d->fb_wide) x0 = d->fb_wide;
+            if (x1 > d->fb_wide + 256) x1 = d->fb_wide + 256;
+        }
         for (int x = 0; x < w; x++) {
             if (x >= x0 && x < x1) continue;
             uint16_t s = sp[x];

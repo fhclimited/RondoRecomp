@@ -12,6 +12,8 @@ work/
 *.img
 *.ccd
 *.sub
+*.ico
+icon.png
 
 # Build output
 build/
