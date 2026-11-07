@@ -26,8 +26,8 @@ Findings so far: [docs/findings.md](docs/findings.md).
   Stage 0, 99.3% of CPU cycles run natively; 402,593 native chunk executions were checked
   against the interpreter with no differences. See [docs/recompiler.md](docs/recompiler.md).
 - **Runtime:** HuC6280 interpreter (253/256 opcodes pass every SingleStepTests case), PC Engine
-  video, sound (PSG effects, ADPCM voices, CD audio), backup RAM saves, and the System Card
-  functions the game uses, reimplemented in C (no BIOS needed). See [docs/runtime.md](docs/runtime.md).
+  video, sound (PSG effects, ADPCM voices, CD audio), backup RAM saves, save states, rewind,
+  and the System Card functions the game uses, reimplemented in C (no BIOS needed). See [docs/runtime.md](docs/runtime.md).
 
 ## For players
 

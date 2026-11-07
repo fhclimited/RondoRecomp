@@ -68,6 +68,8 @@ typedef struct RecompStats {
 } RecompStats;
 
 void recomp_init(void);
+/* Forget cached code checks (after memory was replaced, e.g. a save state was loaded). */
+void recomp_invalidate(void);
 bool recomp_enabled(void);
 void recomp_set_enabled(bool on);
 /* Finds a chunk whose code matches memory and that has the CPU's PC as an entry. */

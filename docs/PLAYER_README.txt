@@ -26,10 +26,18 @@ I (jump)     X                         B (East)
 II (attack)  Z                         A (South)
 RUN          Enter                     Start / Menu
 SELECT       Backspace / Right Shift   Back / View
+Rewind       hold R                    hold left trigger or left shoulder
+Save state   F5
+Load state   F8
+State slot   F6 / F7 (slots 1-9)
 Fullscreen   F11
 Quit         Esc
 
-Saves are kept in %APPDATA%\RondoRecomp\RondoRecomp\bram.bin.
+Rewind plays the game backwards while held (faster after 3 seconds) and continues from
+where you let go; up to 30 minutes are kept. Rewinding never changes your saved game.
+
+In-game saves are kept in %APPDATA%\RondoRecomp\RondoRecomp\bram.bin, save states in
+%APPDATA%\RondoRecomp\RondoRecomp\states\.
 
 Rebuild
 -------

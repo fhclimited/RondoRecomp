@@ -22,6 +22,7 @@ add_library(pce STATIC
   runtime/pce/bios_hle.c
   runtime/pce/bram.c
   runtime/pce/sound.c
+  runtime/pce/state.c
   runtime/recomp/dispatch.c
   runtime/util/png.c)
 target_include_directories(pce PUBLIC runtime)
@@ -106,3 +107,8 @@ add_test(NAME huc6280_sst COMMAND sst_huc6280 ${SST_DIR} -v 0 --known 73,c3,f3)
 add_executable(sound_test tests/sound_test.c runtime/recomp/recomp_none.c)
 target_link_libraries(sound_test PRIVATE pce)
 add_test(NAME sound COMMAND sound_test)
+
+# needs the disc: build/state_test <game.cue>
+add_executable(state_test tests/state_test.c runtime/recomp/recomp_none.c)
+target_include_directories(state_test PRIVATE tools)
+target_link_libraries(state_test PRIVATE pce)

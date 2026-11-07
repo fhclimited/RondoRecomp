@@ -67,14 +67,15 @@ EX_MEMOPEN, MA_MUL8U/8S/16U, MA_DIV16U/16S.
 BM_FORMAT/FREE/READ/WRITE/DELETE/FILES: backup RAM in the System Card's file format (`bram.c`),
 saved by the frontend in the user's pref folder.
 AD_PLAY/STOP/STAT/READ/WRITE/RESET drive the ADPCM player in `sound.c`.
-Stubbed (return success): AD_CPLAY (streaming from CD, unused by Rondo), EX_SATCLR.
+AD_CPLAY streams ADPCM straight from the CD. Stubbed (return success): EX_SATCLR.
 Not yet implemented: EX_GETFNT (font glyphs).
 
 ## Sound (`runtime/pce/sound.c`)
 
 - **PSG** (sound effects): 6 wavetable channels (32 x 5-bit samples), DDA mode, noise on
   channels 4 and 5, 5-bit volume in 1.5 dB steps and 4-bit channel/global balance in 3 dB steps.
-  The LFO (channel 1 modulating channel 0) is not emulated; Rondo never enables it.
+  LFO: channel 1's waveform, clocked `lfo_freq` times slower, modulates channel 0's period
+  (x1, x16, x256) and is not heard itself.
 - **ADPCM** (voices): OKI MSM5205-style 4-bit ADPCM from the 64 KiB ADPCM RAM at
   32 kHz / (16 - rate), **low nibble first** (checked on the game's own clips: the other order
   decodes to noise), linearly interpolated to 44.1 kHz. AD_STAT reports busy while a clip
@@ -87,6 +88,23 @@ Not yet implemented: EX_GETFNT (font glyphs).
 CD audio: CD_PLAY/CD_SEARCH positions are BCD MSF (`$40`), LBA (`$00`) or track number (`$80`);
 the low bits of the end-type byte select repeat (1) or play once. `pce_audio_render()` streams the
 WAV/BIN audio tracks at 44.1 kHz with fades.
+
+## Save states and rewind (`runtime/pce/state.c`)
+
+- A snapshot is the whole emulated machine (`Pce`) with host-side fields zeroed: disc handles,
+  memory-map pointers, framebuffer, audio output queue, diagnostics, input. Restoring keeps the
+  live host fields and invalidates the recompiler's cached code checks (they are keyed by the
+  per-bank write counters a restore rolls back).
+- Save-state files: header (format, state size, disc fingerprint) + the snapshot, delta-coded
+  against zeros (about 380 KB). States from another disc or another build are refused.
+- Rewind: after each frame, the XOR difference to the previous snapshot is stored as zero-run /
+  literal-run tokens (about 0.8 KB per frame) with that frame's input. XOR is its own inverse, so
+  applying the newest difference steps the snapshot back exactly one frame. While rewinding, the
+  frontend restores each earlier state and replays one frame of it to show the picture, with
+  audio muted; on release play continues from the exact rewound state.
+- `build/state_test <game.cue>`: restore + replay and state files reproduce the machine state
+  byte for byte; rewinding N frames lands exactly on the recorded state.
+- `rondo.exe --autotest` saves, loads and rewinds by itself and logs the result to rondo.log.
 
 ## Windowed frontend (`tools/frontend`, needs SDL3)
 
@@ -101,6 +119,9 @@ build/rondo.exe "<path>/game.cue"
 | II | Z | South (A) |
 | RUN | Enter | Start |
 | SELECT | Right Shift / Backspace | Back |
+| Rewind (hold) | R | left trigger / left shoulder |
+| Save / load state | F5 / F8 | |
+| State slot | F6 / F7 | |
 | Fullscreen / quit | F11 / Esc | |
 
 Video is shown at 4:3 with nearest-neighbour scaling; frames are paced at 59.83 Hz.

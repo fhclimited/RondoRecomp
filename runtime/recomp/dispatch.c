@@ -31,6 +31,13 @@ void recomp_init(void)
     memset(&stats, 0, sizeof stats);
 }
 
+void recomp_invalidate(void)
+{
+    size_t n = (size_t)(recomp_chunk_count ? recomp_chunk_count : 1);
+    if (verified_gen) memset(verified_gen, 0, n * sizeof *verified_gen);
+    if (failed_gen) memset(failed_gen, 0, n * sizeof *failed_gen);
+}
+
 bool recomp_enabled(void) { return enabled && recomp_entry_count > 0; }
 void recomp_set_enabled(bool on) { enabled = on; }
 void recomp_set_verify(int every_n) { verify_every = every_n; }
