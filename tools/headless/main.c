@@ -165,6 +165,8 @@ int main(int argc, char **argv)
     long start_frame = 0;
     int wide = 0;   /* --wide N: widescreen extension in pixels per side */
     long vram_dump_at = -1;            /* --dump-vram FRAME:FILE: all of VRAM after that frame */
+    long adpcm_dump_at = -1;           /* --dump-adpcm FRAME:FILE: the 64 KiB of ADPCM RAM */
+    char adpcm_dump_path[256] = "";
     char vram_dump_path[256] = "";
     long run_at[16][2]; /* --run FRAME:LEN: hold the run button */
     int n_run = 0;
@@ -228,6 +230,7 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(argv[i], "--wide") && i + 1 < argc) wide = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &vram_dump_at, vram_dump_path);
+        else if (!strcmp(argv[i], "--dump-adpcm") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &adpcm_dump_at, adpcm_dump_path);
         else if (!strcmp(argv[i], "--wide-skip") && i + 1 < argc) {   /* leave patches out: list of indexes */
             char tmp[128];
             snprintf(tmp, sizeof tmp, "%s", argv[++i]);
@@ -382,6 +385,10 @@ int main(int argc, char **argv)
         if (vram_dump_at == f + 1) {
             FILE *vf = fopen(vram_dump_path, "wb");
             if (vf) { fwrite(pce.vdc.vram, 2, 0x8000, vf); fclose(vf); }
+        }
+        if (adpcm_dump_at == f + 1) {
+            FILE *af = fopen(adpcm_dump_path, "wb");
+            if (af) { fwrite(pce.adpcm, 1, sizeof pce.adpcm, af); fclose(af); }
         }
         for (int i = 0; i < n_mem; i++)
             if (mem_at[i].frame == f + 1) {

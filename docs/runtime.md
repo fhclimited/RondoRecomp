@@ -198,7 +198,7 @@ FRAME:FILE`, `--ram-trace FILE` (work RAM + pad after every frame, for offline s
 `--wide-report FRAME` (which widescreen patches are in), `--write-watch ADDR,...` (which
 instruction changes those work-RAM bytes; interpreter), `--vram-watch LO:HI` (which
 instructions write that VRAM range), `--dump-mem FRAME:FILE` (all 256 banks + MPRs, for
-disassembly), `--dump-vram FRAME:FILE`, `--dump-sat FRAME` (sprite table), `--scroll-log FILE`
+disassembly), `--dump-vram FRAME:FILE`, `--dump-adpcm FRAME:FILE` (the 64 KiB of ADPCM RAM), `--dump-sat FRAME` (sprite table), `--scroll-log FILE`
 (scroll registers mid-screen per frame). Button
 names for `--press` are lower case: `i`, `ii`, `select`, `run`, `up`, `down`, `left`, `right`.
 
