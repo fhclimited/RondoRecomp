@@ -36,8 +36,11 @@ Findings so far: [docs/findings.md](docs/findings.md).
   sub-weapon / Item Crash / backflip buttons, and a Japanese option (with your Japanese disc).
 - The original Japanese disc and the English translation, installed side by side (the
   Japanese story text uses a bundled public-domain kanji font in place of the System Card's).
-- Widescreen that shows more of the level (enemies included) on 16:9 and 21:9 screens,
-  Richter's run from Symphony of the Night (hold LB), and Maria cheats (unlocked; play as her
+- Two modes: Classic (the original 4:3 picture, filled or stretched) and Remaster: widescreen
+  that shows more of the level (enemies included) on 16:9 and 21:9 screens, the rooms around
+  you drawn in and stitched together the way the game moves between them (room changes glide),
+  and a Symphony of the Night style map of each stage.
+- Richter's run from Symphony of the Night (hold LB), and Maria cheats (unlocked; play as her
   from the Prologue on). See [docs/runtime.md](docs/runtime.md).
 
 ## For players

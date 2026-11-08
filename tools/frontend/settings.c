@@ -8,7 +8,7 @@
 void settings_default(Settings *s)
 {
     memset(s, 0, sizeof *s);
-    s->widescreen = true;
+    s->mode = MODE_REMASTER;
     s->aspect = ASPECT_4_3;
     s->scaling = SCALE_FIT;
     s->filter = FILTER_SHARP;
@@ -29,6 +29,7 @@ void settings_load(Settings *s, const char *path)
     FILE *f = fopen(path, "r");
     if (!f) return;
     char line[1200];
+    bool have_mode = false;
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
         char *eq = strchr(line, '=');
@@ -39,9 +40,11 @@ void settings_load(Settings *s, const char *path)
         for (char *e = key + strlen(key); e > key && e[-1] == ' '; ) *--e = 0;
         while (*val == ' ') val++;
         int n = atoi(val);
+        if (!strcmp(key, "mode")) have_mode = true;
         if (!strcmp(key, "fullscreen")) s->fullscreen = n != 0;
         else if (!strcmp(key, "aspect")) s->aspect = clampi(n, 0, ASPECT_COUNT - 1);
-        else if (!strcmp(key, "widescreen")) s->widescreen = n != 0;
+        else if (!strcmp(key, "mode")) s->mode = clampi(n, 0, MODE_COUNT - 1);
+        else if (!strcmp(key, "widescreen") && !have_mode) s->mode = n ? MODE_REMASTER : MODE_CLASSIC;   /* before 0.10 */
         else if (!strcmp(key, "scaling")) s->scaling = clampi(n, 0, SCALE_COUNT - 1);
         else if (!strcmp(key, "filter")) s->filter = clampi(n, 0, FILTER_COUNT - 1);
         else if (!strcmp(key, "sides")) s->sides = clampi(n, 0, SIDES_COUNT - 1);
@@ -68,12 +71,12 @@ bool settings_save(const Settings *s, const char *path)
     if (!f) return false;
     fprintf(f,
             "# Rondo Recomp options (also changed from the in-game menu: F1 / Back)\n"
-            "fullscreen = %d\nwidescreen = %d\naspect = %d\nscaling = %d\nfilter = %d\nsides = %d\n"
+            "fullscreen = %d\nmode = %d\naspect = %d\nscaling = %d\nfilter = %d\nsides = %d\n"
             "skip_cinematics = %d\nrewind = %d\nvolume = %d\nslot = %d\nstart_screen = %d\n"
             "cheat_health = %d\ncheat_hearts = %d\ncheat_lives = %d\n"
             "maria_unlocked = %d\nplay_maria = %d\n"
             "language = %d\ndisc_ja = %s\ndisc_en = %s\n",
-            s->fullscreen, s->widescreen, s->aspect, s->scaling, s->filter, s->sides,
+            s->fullscreen, s->mode, s->aspect, s->scaling, s->filter, s->sides,
             s->skip, s->rewind, s->volume, s->slot, s->start_screen,
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
             s->maria_unlocked, s->play_maria,

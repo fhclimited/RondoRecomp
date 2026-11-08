@@ -216,14 +216,20 @@ void vdc_line_start(Vdc *d, int line)
 
 /* ---- rendering ------------------------------------------------------------- */
 
-static uint16_t row_scroll[PCE_FB_MAX_H];
-static uint8_t row_bg_blank[PCE_FB_MAX_H], row_bg_edge[PCE_FB_MAX_H];
+static uint16_t row_scroll[PCE_FB_MAX_H], row_y[PCE_FB_MAX_H];
+static uint8_t row_bg_blank[PCE_FB_MAX_H], row_bg_edge[PCE_FB_MAX_H], row_bg_on[PCE_FB_MAX_H];
 static const uint8_t *row_clip;
+static uint32_t bg_fb[PCE_FB_MAX_W * PCE_FB_MAX_H];
+static bool wide_clear;
 
 const uint16_t *vdc_row_scroll(void) { return row_scroll; }
+const uint16_t *vdc_row_y(void) { return row_y; }
 const uint8_t *vdc_row_bg_blank(void) { return row_bg_blank; }
 const uint8_t *vdc_row_bg_edge(void) { return row_bg_edge; }
+const uint8_t *vdc_row_bg_on(void) { return row_bg_on; }
+const uint32_t *vdc_fb_bg(void) { return bg_fb; }
 void vdc_set_row_clip(const uint8_t *rows) { row_clip = rows; }
+void vdc_set_wide_clear(bool clear) { wide_clear = clear; }
 
 /* x0: screen x of out[0] (negative in widescreen) */
 static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
@@ -323,6 +329,8 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
     uint16_t cr = d->reg[R_CR];
     int x0 = -d->fb_wide;
     row_scroll[row] = d->reg[R_BXR] & 0x3FF;
+    row_y[row] = (uint16_t)y;
+    row_bg_on[row] = (cr & 0x80) != 0;
     if (cr & 0x80) render_bg(d, y, x0, w, bg);
     if (cr & 0x40) render_sprites(d, row, x0, w, sp);
     {
@@ -332,12 +340,12 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
         row_bg_edge[row] = d->fb_wide && w >= 4 && (bg[0] | bg[1] | bg[2] | bg[3]) != 0;
     }
 
-    uint32_t *dst = &d->fb[row * PCE_FB_MAX_W];
+    uint32_t *dst = &d->fb[row * PCE_FB_MAX_W], *bgo = &bg_fb[row * PCE_FB_MAX_W];
     for (int x = 0; x < w; x++) {
         uint16_t s = sp[x];
-        if (s && ((s & 0x8000) || !bg[x])) dst[x] = vce->argb[s & 0x1FF];
-        else if (bg[x]) dst[x] = vce->argb[bg[x]];
-        else dst[x] = vce->argb[0];
+        uint32_t b = vce->argb[bg[x]];         /* colour 0 of palette 0 where nothing is drawn */
+        bgo[x] = b;
+        dst[x] = s && ((s & 0x8000) || !bg[x]) ? vce->argb[s & 0x1FF] : b;
     }
     if (d->fb_wide) {
         /* beyond the room's walls (or the original 256 pixels on a clipped row): black
@@ -347,10 +355,16 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
             if (row_clip[row] == VDC_CLIP_BOTH && x0 < d->fb_wide) x0 = d->fb_wide;
             if (x1 > d->fb_wide + 256) x1 = d->fb_wide + 256;
         }
+        /* past the walls (not a clipped band) clear rather than black if asked: remaster
+         * mode draws the rooms next door there */
+        int wx0 = d->wide_x0 < 0 ? 0 : d->wide_x0, wx1 = d->wide_x1 > w ? w : d->wide_x1;
         for (int x = 0; x < w; x++) {
             if (x >= x0 && x < x1) continue;
             uint16_t s = sp[x];
-            dst[x] = s ? vce->argb[s & 0x1FF] : 0xFF000000u;
+            bool beyond = x < wx0 || x >= wx1;
+            uint32_t none = wide_clear && beyond ? 0 : 0xFF000000u;
+            dst[x] = s ? vce->argb[s & 0x1FF] : none;
+            bgo[x] = beyond ? 0 : 0xFF000000u;
         }
     }
 }

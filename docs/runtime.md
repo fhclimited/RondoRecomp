@@ -192,6 +192,31 @@ the left: only the right side is cut (where the map wraps round to its rear), un
 band's background has come in clear of the picture's left edge (at 21:9 the picture shows
 480 of the map's 512 pixels).
 
+Modes (`Settings.mode`): Classic is the 4:3 picture (widescreen off, the Aspect ratio
+option fills the height or stretches); Remaster turns on the widescreen above and the world:
+
+Remaster's world (`world.c`, no SDL; drawn by `worldview.c`): the rooms of each stage laid out
+side by side. The game has no shared map (findings, "Rooms"), so a room is placed against the
+one the player left when it settles (four frames playing with the background on): by the
+edge of the screen the player was at, the rooms' views meet there (the player's height kept);
+anywhere else (a door) the player stands at the same place in both. The first placement of a
+room holds. Each room keeps two pictures in 256 x 256 tiles: what the camera has shown (each
+frame's background without sprites, `vdc_fb_bg`, at the camera the frame was drawn with: the
+copy taken at 69:41FD, since the logic runs across the frame boundary and can be caught
+half-way), and the room drawn from the game's own data within the camera's limits (the
+column-drawing code's tables, found by its bytes in bank $6F; with the tiles and colours in
+VRAM, so for the room being played). `worldview_compose` draws, on a canvas as wide as the
+window's shape needs at game resolution, the stage's rooms (data under seen, the room being
+played over the others) and the live picture where the camera is; beyond the room's walls the
+live picture is clear (`vdc_set_wide_clear`). The canvas then goes through the usual video
+options (`video_set_source`). The view follows the camera, and glides (a sixth of the way a
+frame) after a jump, so a room change pans across; between rooms (the new room's first frames
+have the background off) it holds and the live picture is left out. The map (`worldview_
+draw_map`, RT / M / Tab, the game paused): pages seen (light grey) and drawn from the data
+(darker), white along each room's outline, the player a blinking yellow dot; over the picture
+blurred at half resolution. Placements and seen pages are saved in `map.txt` in the profile,
+each stage's pictures in `map_XX.pic` (run-length encoded tiles), loaded when the stage starts.
+
 Start screen (`menu.c` page `PAGE_START`, the in-game menu's root swapped for one with Play
 at the top; the option pages return to whichever root opened them): shown when rondo.exe
 starts unless `--play` or the Start screen option is off. The game is loaded but does not
@@ -224,7 +249,9 @@ screenshots of the video modes, menu pages and start screen to DIR; checks the s
 screen's keys and mouse layout; switches language at the end) and `rondo.exe
 --autotest-start` (the start screen for 600 frames, checking the game waits behind it, a
 mouse click on Play sent through the event queue, the title screen reached; then START
-pressed during the intro skipping it). All log to `rondo.log` and
+pressed during the intro skipping it), and `rondo.exe --autotest-play FILE` (a scripted run
+for checking pictures: a save state to start from, presses per frame, window size, mode,
+screenshots of a range of frames and of the map; see `main.c`). All log to `rondo.log` and
 keep their files in a `test` folder, never touching the player's saves. Their window
 cannot take the keyboard focus, and they ignore real keyboard, mouse and controller input
 (events and polled state alike): only the input events a test sends itself, marked with
@@ -253,8 +280,10 @@ FRAME:FILE`, `--ram-trace FILE` (work RAM + pad after every frame, for offline s
 `--wide-report FRAME` (which widescreen patches are in), `--write-watch ADDR,...` (which
 instruction changes those work-RAM bytes; interpreter), `--vram-watch LO:HI` (which
 instructions write that VRAM range), `--dump-mem FRAME:FILE` (all 256 banks + MPRs, for
-disassembly), `--dump-vram FRAME:FILE`, `--dump-adpcm FRAME:FILE` (the 64 KiB of ADPCM RAM), `--dump-sat FRAME` (sprite table), `--scroll-log FILE`
-(scroll registers mid-screen per frame). Button
+disassembly), `--dump-vram FRAME:FILE` (VRAM, then the 512 colours as ARGB), `--dump-adpcm FRAME:FILE` (the 64 KiB of ADPCM RAM), `--dump-sat FRAME` (sprite table), `--scroll-log FILE`
+(scroll registers mid-screen per frame), `--inputs FILE` (presses from a file, a `FRAME LEN
+BUTTONS` line each), `--world DIR` (remaster mode's world alongside: room placements as they
+happen, and each room's pictures and the stage's layout as PNGs in DIR at the end). Button
 names for `--press` are lower case: `i`, `ii`, `select`, `run`, `up`, `down`, `left`, `right`.
 
 The interpreter runs at about 2,600 frames per second (~43× real time).

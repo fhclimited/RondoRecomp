@@ -30,6 +30,8 @@
 #include "theme.h"
 #include "video.h"
 #include "wide.h"
+#include "world.h"
+#include "worldview.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
 #define AUDIO_RATE 44100
@@ -144,11 +146,27 @@ static GameWatch gw;
 static char pref_dir[1024];
 static bool no_save_files;   /* test runs: fresh backup RAM, nothing written to bram.bin */
 static Wide wide;            /* widescreen: decided before every frame */
+static World world;          /* remaster mode: the stage's rooms around the picture, the map */
+static bool remaster;        /* Settings.mode is MODE_REMASTER */
 
 static void run_frame(void)
 {
     wide_frame(&wide, &pce);
+    if (remaster) world_before_frame(&world, &pce);
     pce_run_frame(&pce);
+    if (remaster) world_after_frame(&world, &pce);
+}
+
+/* Pixels each side of the 256 that fill a ww x wh window (remaster mode's view: not
+ * limited to what the game can draw itself, see wide.h). */
+static int view_extent(int ww, int wh, double picture_aspect)
+{
+    if (wh <= 0) return 0;
+    double w = 256.0 * ((double)ww / (double)wh) / picture_aspect;
+    int e = (int)((w - 256.0) / 2.0);
+    if (e < 0) e = 0;
+    if (e > 1024) e = 1024;
+    return e & ~1;
 }
 
 typedef struct Session {
@@ -209,6 +227,8 @@ static bool start_game(Session *ss, const char *disc, char *err, int err_len)
     pce.bram_dirty = false;
     if (have_rewind) rewind_reset(&rw, &pce);
     game_watch_reset(&gw, &pce);
+    world_save(&world);
+    world_reset_play(&world);
     return true;
 }
 
@@ -313,6 +333,70 @@ static void screenshot(SDL_Renderer *ren, const char *path)
     }
 }
 
+/* --autotest-play (see main) */
+typedef struct PlayTest {
+    char state[1024], out[1024];
+    int win_w, win_h, mode;
+    struct { uint64_t frame; int len; uint8_t mask; } press[512];
+    int n_press;
+    uint64_t shot_from, shot_to, shot_step, map_at, end_at;
+    char last_event[160];
+} PlayTest;
+
+static uint8_t buttons(const char *s)
+{
+    static const struct { const char *n; uint8_t m; } map[] = {
+        {"i", PAD_I}, {"ii", PAD_II}, {"select", PAD_SELECT}, {"run", PAD_RUN},
+        {"up", PAD_UP}, {"down", PAD_DOWN}, {"left", PAD_LEFT}, {"right", PAD_RIGHT},
+    };
+    uint8_t m = 0;
+    char tmp[128];
+    snprintf(tmp, sizeof tmp, "%s", s);
+    for (char *tok = strtok(tmp, ","); tok; tok = strtok(NULL, ","))
+        for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
+            if (!strcmp(tok, map[i].n)) m |= map[i].m;
+    return m;
+}
+
+static bool play_test_load(PlayTest *t, const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    t->win_w = 1280;
+    t->win_h = 720;
+    t->mode = MODE_REMASTER;
+    snprintf(t->out, sizeof t->out, ".");
+    char line[1200], a[1024];
+    unsigned long long x, y, z;
+    int len;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "state %1023s", a) == 1) snprintf(t->state, sizeof t->state, "%s", a);
+        else if (sscanf(line, "out %1023s", a) == 1) snprintf(t->out, sizeof t->out, "%s", a);
+        else if (sscanf(line, "window %llu %llu", &x, &y) == 2) { t->win_w = (int)x; t->win_h = (int)y; }
+        else if (sscanf(line, "mode %1023s", a) == 1) t->mode = strcmp(a, "classic") ? MODE_REMASTER : MODE_CLASSIC;
+        else if (sscanf(line, "press %llu %d %127s", &x, &len, a) == 3 && t->n_press < 512) {
+            t->press[t->n_press].frame = x;
+            t->press[t->n_press].len = len;
+            t->press[t->n_press++].mask = buttons(a);
+        } else if (sscanf(line, "shots %llu %llu %llu", &x, &y, &z) == 3) {
+            t->shot_from = x;
+            t->shot_to = y;
+            t->shot_step = z;
+        } else if (sscanf(line, "map %llu", &x) == 1) t->map_at = x;
+        else if (sscanf(line, "end %llu", &x) == 1) t->end_at = x;
+    }
+    fclose(f);
+    return true;
+}
+
+static uint8_t play_test_pad(const PlayTest *t, uint64_t frame)
+{
+    uint8_t m = 0;
+    for (int i = 0; i < t->n_press; i++)
+        if (frame >= t->press[i].frame && frame < t->press[i].frame + (uint64_t)t->press[i].len) m |= t->press[i].mask;
+    return m;
+}
+
 int main(int argc, char **argv)
 {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
@@ -324,11 +408,23 @@ int main(int argc, char **argv)
      * skipping, take screenshots of the video modes and menu into DIR, then quit. */
     bool autotest = false, play_now = false, autotest_start = false;
     const char *features_dir = NULL, *disc_arg = NULL;
+    /* --autotest-play FILE: a scripted run for checking pictures (remaster mode), lines of
+     *   state PATH            start from this save state (any disc id)
+     *   out DIR               where screenshots go
+     *   window W H            the window's size
+     *   mode classic|remaster
+     *   press FRAME LEN BUTTONS   (as rondo_headless --inputs: i,ii,up,down,left,right,run,select)
+     *   shots FROM TO STEP    screenshots of those game frames (frame_N.bmp)
+     *   map FRAME             open the map at that frame (map.bmp), then stop
+     *   end FRAME             stop there
+     * with infinite health and lives, as fast as it goes. */
+    const char *play_test = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autotest")) autotest = true;
         else if (!strcmp(argv[i], "--play")) play_now = true;
         else if (!strcmp(argv[i], "--autotest-features") && i + 1 < argc) features_dir = argv[++i];
         else if (!strcmp(argv[i], "--autotest-start")) autotest_start = true;
+        else if (!strcmp(argv[i], "--autotest-play") && i + 1 < argc) play_test = argv[++i];
         else disc_arg = argv[i];
     }
     char autotest_log[2048] = "";
@@ -337,7 +433,7 @@ int main(int argc, char **argv)
     locate_profile_dir(pref_dir, sizeof pref_dir);
     char settings_path[1100], states_dir[1100];
     snprintf(settings_path, sizeof settings_path, "%ssettings.ini", pref_dir);
-    if (autotest || features_dir || autotest_start) {
+    if (autotest || features_dir || autotest_start || play_test) {
         /* test runs keep their state files apart from the player's */
         no_save_files = true;
         size_t l = strlen(pref_dir);
@@ -346,9 +442,16 @@ int main(int argc, char **argv)
     }
     snprintf(states_dir, sizeof states_dir, "%sstates", pref_dir);
     SDL_CreateDirectory(states_dir);
+    {   /* remaster mode's map of the rooms seen, kept with the saves */
+        char map_path[1100];
+        snprintf(map_path, sizeof map_path, "%smap.txt", pref_dir);
+        world.free_tex = worldview_free_tex;
+        world_init(&world, map_path);
+        if (autotest || features_dir || autotest_start || play_test) world.path[0] = 0;   /* tests: not saved */
+    }
     Settings set;
     settings_load(&set, settings_path);
-    bool test_mode = autotest || features_dir || autotest_start;
+    bool test_mode = autotest || features_dir || autotest_start || play_test;
     if (test_mode) {   /* fixed options; nothing is saved */
         settings_default(&set);
         if (features_dir) {
@@ -362,13 +465,27 @@ int main(int argc, char **argv)
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (set.fullscreen && !test_mode) flags |= SDL_WINDOW_FULLSCREEN;
     if (test_mode) flags |= SDL_WINDOW_NOT_FOCUSABLE;   /* never takes the keyboard from the player */
-    SDL_Window *win = SDL_CreateWindow(title, features_dir ? 1280 : 960, 720, flags);
+    PlayTest pt = {0};
+    if (play_test && !play_test_load(&pt, play_test)) {
+        fprintf(stderr, "cannot read %s\n", play_test);
+        return 1;
+    }
+    if (play_test) {
+        set.mode = pt.mode;
+        set.cheat_health = set.cheat_lives = true;
+    }
+    SDL_Window *win = SDL_CreateWindow(title, play_test ? pt.win_w : features_dir ? 1280 : 960, play_test ? pt.win_h : 720,
+                                       flags);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, NULL) : NULL;
     Video video;
     if (!ren || !video_init(&video, ren)) {
         fprintf(stderr, "SDL video setup: %s\n", SDL_GetError());
         return 1;
     }
+    WorldView wv;
+    worldview_init(&wv, ren);
+    bool map_open = false, was_remaster = set.mode == MODE_REMASTER;
+    Uint64 map_opened = 0;
 
     char disc_path[1024];
     if (!choose_disc(win, ren, disc_arg, disc_path, sizeof disc_path)) {
@@ -390,6 +507,11 @@ int main(int argc, char **argv)
         return 1;
     }
     set.language = ss.language;
+    if (play_test && pt.state[0] &&
+        !pce_state_load(&pce, pt.state, ss.disc_id, err, sizeof err) && !pce_state_load(&pce, pt.state, 0, err, sizeof err)) {
+        fprintf(stderr, "%s: %s\n", pt.state, err);
+        return 1;
+    }
     /* entry points that run on the interpreter are kept next to rondo.exe; running Setup with
      * --rebuild recompiles them too */
     char misses_path[1024] = "";
@@ -525,6 +647,7 @@ int main(int argc, char **argv)
                     } else if (pce_state_load(&pce, path, ss.disc_id, err, sizeof err)) {
                         if (have_rewind) rewind_reset(&rw, &pce);
                         game_watch_reset(&gw, &pce);
+                        world_reset_play(&world);
                         pce.bram_dirty = false;
                         menu.open = false;
                         hold_input = true;
@@ -587,6 +710,25 @@ int main(int argc, char **argv)
                 }
                 continue;
             }
+            /* the map (remaster mode): the game waits while it is open */
+            if (map_open) {
+                bool close = input_is_map(&ev) || input_is_start(&ev) ||
+                             (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat &&
+                              (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1)) ||
+                             (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+                              (ev.gbutton.button == SDL_GAMEPAD_BUTTON_EAST || ev.gbutton.button == SDL_GAMEPAD_BUTTON_BACK));
+                if (close) {
+                    map_open = false;
+                    hold_input = true;
+                }
+                continue;
+            }
+            if (input_is_map(&ev) && remaster && game_playing(&pce) && !test_mode) {
+                map_open = true;
+                map_opened = SDL_GetTicks();
+                input_cancel_macros(&in);
+                continue;
+            }
             /* playing */
             bool open_menu = false;
             if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
@@ -608,6 +750,7 @@ int main(int argc, char **argv)
                         else show_osd("Save failed: %s", err);
                     } else if (pce_state_load(&pce, path, ss.disc_id, err, sizeof err)) {
                         show_osd("State %d loaded", set.slot);
+                        world_reset_play(&world);
                         if (have_rewind) rewind_reset(&rw, &pce);
                         game_watch_reset(&gw, &pce);
                         input_cancel_macros(&in);
@@ -640,16 +783,36 @@ int main(int argc, char **argv)
         }
 
         GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives, set.maria_unlocked, set.play_maria};
-        {   /* widescreen fills the window's shape */
+        remaster = set.mode == MODE_REMASTER;
+        if (remaster != was_remaster) {           /* switched: the rooms are placed from the next one */
+            world_reset_play(&world);
+            was_remaster = remaster;
+            map_open = false;
+        }
+        vdc_set_wide_clear(remaster);
+        int view_ext = 0;
+        {   /* widescreen fills the window's shape (remaster mode) */
             int ww, wh;
             SDL_GetRenderOutputSize(ren, &ww, &wh);
-            wide.want = set.widescreen && wh > 0
+            wide.want = remaster && wh > 0
                             ? wide_extent((double)ww / (double)wh, video_picture_aspect(&video, &set)) : 0;
+            view_ext = remaster ? view_extent(ww, wh, video_picture_aspect(&video, &set)) : 0;
         }
+        if (!menu.open && input_map_trigger(&in) && !test_mode) {
+            if (map_open) {
+                map_open = false;
+                hold_input = true;
+            } else if (remaster && game_playing(&pce)) {
+                map_open = true;
+                map_opened = SDL_GetTicks();
+                input_cancel_macros(&in);
+            }
+        }
+        if (menu.open || !game_playing(&pce)) map_open = false;
         bool rewinding = false, ran_frame = false;
         if (menu_on_start_screen(&menu)) {
             /* the start screen: the game waits for Play (nothing runs, nothing sounds) */
-        } else if (!menu.open) {
+        } else if (!menu.open && !map_open) {
             /* Play on the start screen goes on to the title screen: from power-on (the logo,
              * state $00) through the intro */
             bool to_title = skip_to_title && (game_state(&pce) == 0x00 || game_in_intro(&pce));
@@ -736,7 +899,8 @@ int main(int argc, char **argv)
                     rewind_held_frames = 0;
                     input_cancel_macros(&in);
                 }
-                uint8_t pad = features_dir ? capture_pad((int)pce.frame) : test_mode ? 0 : input_game(&in);
+                uint8_t pad = features_dir ? capture_pad((int)pce.frame) : play_test ? play_test_pad(&pt, pce.frame)
+                            : test_mode ? 0 : input_game(&in);
                 if (hold_input && !features_dir) { /* until everything is let go */
                     if (pad) pad = 0;
                     else hold_input = false;
@@ -769,8 +933,18 @@ int main(int argc, char **argv)
             }
         }
 
-        /* video */
+        /* video (remaster mode: the rooms around the picture, on a wider canvas) */
         video_upload(&video, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W, pce.vdc.fb_wide);
+        {
+            SDL_Texture *canvas = NULL;
+            int cw = 0, chh = 0;
+            if (remaster && game_playing(&pce) && !menu_on_start_screen(&menu)) {
+                if (ran_frame) world_step_view(&world);
+                canvas = worldview_compose(&wv, &world, video.frame, pce.vdc.fb_w, pce.vdc.fb_h, pce.vdc.fb_wide,
+                                           world.shown, view_ext, &cw, &chh);
+            }
+            video_set_source(&video, canvas, cw, chh, view_ext);
+        }
         if (features_dir && !t_shots && pce.frame >= 17880) {
             /* screenshots: 16:9 window with each picture mode, then the menu pages */
             t_shots = true;
@@ -856,6 +1030,21 @@ int main(int argc, char **argv)
             video_draw(&video, &set);
             snprintf(path, sizeof path, "%s/stage1_widescreen.bmp", features_dir);
             screenshot(ren, path);
+            {   /* remaster mode: the map over the paused game */
+                SDL_FRect d = video_draw(&video, &set);
+                worldview_draw_map(&wv, &world, &pce, d, 1.0f);   /* open, the dot lit */
+                snprintf(path, sizeof path, "%s/map.bmp", features_dir);
+                screenshot(ren, path);
+                int placed = 0, rooms = 0;
+                for (int i = 0; i < world.n; i++)
+                    if (world.rooms[i].area == world.area) {
+                        rooms++;
+                        placed += world.rooms[i].placed;
+                    }
+                TLOG("features: remaster: stage %02X, %d of %d rooms placed, room drawing from the data %s; "
+                     "last: %s\n", world.area, placed, rooms, world.data_ok ? "recognised" : "NOT RECOGNISED",
+                     world.last_event);
+            }
             TLOG("features: Stage 1 at frame %llu drawn %d px wider on each side (game changes %s)\n",
                  (unsigned long long)pce.frame, pce.vdc.fb_wide, wide.patched ? "in place" : "missing");
         }
@@ -864,7 +1053,9 @@ int main(int argc, char **argv)
             if (cursor_shown) SDL_ShowCursor();
             else SDL_HideCursor();
         }
-        if (!menu_on_start_screen(&menu)) video_draw(&video, &set);   /* the start screen draws it all */
+        SDL_FRect pic_dst = {0, 0, 0, 0};
+        if (!menu_on_start_screen(&menu)) pic_dst = video_draw(&video, &set);   /* the start screen draws it all */
+        if (map_open) worldview_draw_map(&wv, &world, &pce, pic_dst, (float)(SDL_GetTicks() - map_opened) / 1000.0f);
         if (skipping) {
             draw_banner(ren, skip_intro ? "Skipping the intro..." : "Skipping cinematic...", false);
         } else if (rewinding) {
@@ -875,7 +1066,7 @@ int main(int argc, char **argv)
         } else if (SDL_GetTicks() < osd_until) {
             draw_banner(ren, osd_text, false);
         }
-        if (!menu.open && !skipping && set.skip == SKIP_START && game_in_skippable(&pce))
+        if (!menu.open && !map_open && !skipping && set.skip == SKIP_START && game_in_skippable(&pce))
             draw_banner(ren, "START: skip", true);
         if (menu.open) menu_draw(&menu, &set, ren);
         SDL_RenderPresent(ren);
@@ -899,7 +1090,27 @@ int main(int argc, char **argv)
                  ss.language != from ? (pce.wram[RONDO_STATE] == 0x02 ? " (attract mode after 900 frames)" : " (not running?)") : "");
             running = false;
         }
-        if (features_dir) continue;   /* run uncapped */
+        if (play_test && ran_frame) {
+            uint64_t f = pce.frame;
+            char path[1200];
+            if (pt.shot_step > 0 && f >= pt.shot_from && f <= pt.shot_to && (f - pt.shot_from) % pt.shot_step == 0) {
+                snprintf(path, sizeof path, "%s/frame_%llu.bmp", pt.out, (unsigned long long)f);
+                screenshot(ren, path);
+            }
+            if (pt.map_at && f >= pt.map_at) {
+                SDL_FRect d = video_draw(&video, &set);
+                worldview_draw_map(&wv, &world, &pce, d, 1.0f);
+                snprintf(path, sizeof path, "%s/map.bmp", pt.out);
+                screenshot(ren, path);
+                running = false;
+            }
+            if (pt.end_at && f >= pt.end_at) running = false;
+            if (strcmp(world.last_event, pt.last_event)) {
+                snprintf(pt.last_event, sizeof pt.last_event, "%s", world.last_event);
+                TLOG("play: frame %llu: %s\n", (unsigned long long)f, pt.last_event);
+            }
+        }
+        if (features_dir || play_test) continue;   /* run uncapped */
         next += (Uint64)frame_ns;
         Uint64 now = SDL_GetTicksNS();
         if (next > now) SDL_DelayNS(next - now);
@@ -907,6 +1118,7 @@ int main(int argc, char **argv)
     }
 
     flush_bram(&ss);
+    world_save(&world);
     if (!test_mode) settings_save(&set, settings_path);
     if (misses_path[0] && recomp_stats()->miss_entries) recomp_write_misses(misses_path);
     /* rondo.log next to the executable: what ran natively this session */
@@ -930,6 +1142,8 @@ int main(int argc, char **argv)
         }
     }
     input_close(&in);
+    world_free(&world);
+    worldview_free(&wv);
     video_free(&video);
     if (audio) SDL_DestroyAudioStream(audio);
     SDL_Quit();
