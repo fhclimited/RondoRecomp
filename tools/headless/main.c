@@ -152,7 +152,7 @@ int main(int argc, char **argv)
     /* investigation helpers: WRAM watch, pokes, save states, WRAM dumps */
     int n_ram = 0, n_poke = 0, n_dump = 0;
     unsigned ram_addr[32];
-    struct { unsigned addr, val; } poke[16];
+    struct { unsigned addr, val; long from, to; } poke[16];   /* --poke ADDR=VAL[@FROM:TO] */
     struct { long frame; char path[256]; } dump[16], save_at[4];
     int n_save_at = 0;
     struct { long frame; char path[256]; } mem_at[4];   /* --dump-mem: all 256 banks + MPRs */
@@ -202,7 +202,15 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(argv[i], "--poke") && i + 1 < argc && n_poke < 16) {
             unsigned a, v;
-            if (sscanf(argv[++i], "%x=%x", &a, &v) == 2) { poke[n_poke].addr = a & 0x1FFF; poke[n_poke++].val = v; }
+            long from = 0, to = 0x7FFFFFFF;
+            const char *spec = argv[++i], *at = strchr(spec, '@');
+            if (at) sscanf(at + 1, "%ld:%ld", &from, &to);
+            if (sscanf(spec, "%x=%x", &a, &v) == 2) {
+                poke[n_poke].addr = a & 0x1FFF;
+                poke[n_poke].val = v;
+                poke[n_poke].from = from;
+                poke[n_poke++].to = to;
+            }
         }
         else if (!strcmp(argv[i], "--dump-ram") && i + 1 < argc && n_dump < 16) {
             char *c = argv[++i];
@@ -355,7 +363,8 @@ int main(int argc, char **argv)
         pce.pad = use_script ? capture_pad((int)f) : 0;
         for (int i = 0; i < n_press; i++)
             if (f >= presses[i].frame && f < presses[i].frame + presses[i].len) pce.pad |= presses[i].mask;
-        for (int i = 0; i < n_poke; i++) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
+        for (int i = 0; i < n_poke; i++)
+            if (f >= poke[i].from && f <= poke[i].to) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
         if (skip_cine && game_in_cinematic(&pce)) { pce.pad = 0; skipped++; }
         wide_frame(&wd, &pce);
         if (prompt_dev >= 0) prompt_before_frame(&tp, &pce);

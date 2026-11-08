@@ -102,7 +102,9 @@ items, with the score display moved to the left edge. Up to 21:9 (about 112 extr
 pixels each side) is covered; wider screens get the rest beside the picture.
 Rooms the camera does not scroll through sideways (vertical shafts, boss rooms) keep the
 original 4:3 picture, as do cinematics and menus. Beyond the walls of a room is black.
-Turning widescreen on takes effect from the next room. Where the game parks something just
+Where the picture goes from 4:3 to wide (the Prologue after its story scene, a scrolling
+room after a vertical one) it grows out to the sides over a moment. Turning widescreen on
+takes effect from the next room. Where the game parks something just
 off its 4:3 screen to bring it on later (the Prologue's carriage waits off the left edge
 while the forest goes by), it stays out of sight until it comes in.
 

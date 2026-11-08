@@ -781,7 +781,27 @@ int main(int argc, char **argv)
         }
 
         /* video */
-        video_upload(&video, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W, pce.vdc.fb_wide);
+        {   /* widescreen grows out of the 4:3 picture instead of appearing at once (the Prologue
+             * after its story scene, a scrolling room after a shaft): the columns shown each side
+             * ease towards what the frame has, about 90% of the way in half a second; back
+             * to 4:3 is at once (the game no longer draws them) */
+            static double shown;
+            static int growing;   /* frames the current growth has taken (logged by the features test) */
+            int have = pce.vdc.fb_wide;
+            if (have <= shown) {
+                if (growing > 1 && have > 0 && features_dir)
+                    TLOG("features: widescreen grew out of the 4:3 picture over %d frames (to %d px a side, frame %llu)\n",
+                         growing, have, (unsigned long long)pce.frame);
+                shown = have;
+                growing = 0;
+            } else if (ran_frame) {
+                shown += (have - shown) * 0.09 + 0.25;
+                growing++;
+                if (shown > have) shown = have;
+            }
+            int cut = features_dir ? 0 : have - (int)shown;   /* the test's screenshots: the whole picture */
+            video_upload(&video, pce.vdc.fb + cut, pce.vdc.fb_w - 2 * cut, pce.vdc.fb_h, PCE_FB_MAX_W, have - cut);
+        }
         if (features_dir && !t_shots && pce.frame >= 17880) {
             /* screenshots: 16:9 window with each picture mode, then the menu pages */
             t_shots = true;

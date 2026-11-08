@@ -185,6 +185,11 @@ picture in the game's own letters, cut from those sprites' patterns in VRAM, wit
 and Y drawn in the same style in `prompt.c`. Its colours come from the palette as it is, so
 it fades with the title. No game graphics are kept in the source.
 
+Going from 4:3 to wide, `main.c` uploads the picture cropped to the columns it shows each
+side, easing towards what the frame has (9% of the rest a frame: about half a second), so the
+picture grows out of the 4:3 one; going back is at once. The features test logs how long it
+took.
+
 Widescreen (`wide.c`, `runtime/pce/video.c`; an experimental option, off by default:
 `experimental_widescreen` in settings.ini): the VDC renders `vdc.wide` extra pixels on
 each side of a 256-pixel picture (background from the 512-pixel map, sprites with 10-bit X
