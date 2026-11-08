@@ -44,6 +44,10 @@ Sub-weapon presses Up + Attack for you, Item Crash is the original SELECT button
 Backflip presses Jump twice quickly (as Maria it gives her double jump). The original
 inputs (Up + Attack, Jump twice) work as well.
 
+The PC Engine's start button was called RUN. The game's title screen says PUSH START
+BUTTON! when you are playing with a controller and PUSH ENTER KEY! on the keyboard (in
+place of the original PUSH RUN BUTTON!), going by what you pressed last.
+
 Run is Richter's run from Symphony of the Night: hold LB while walking to go about 1.8
 times as fast (his run there is 2.3 pixels a frame against a 1.25 walk; Rondo's walk is the
 same 1.25). Jumps started while running keep the speed. Maria runs too.

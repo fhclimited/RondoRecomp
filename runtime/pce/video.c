@@ -224,6 +224,8 @@ const uint16_t *vdc_row_scroll(void) { return row_scroll; }
 const uint8_t *vdc_row_bg_blank(void) { return row_bg_blank; }
 const uint8_t *vdc_row_bg_edge(void) { return row_bg_edge; }
 void vdc_set_row_clip(const uint8_t *rows) { row_clip = rows; }
+static uint64_t sprite_hide;
+void vdc_set_sprite_hide(uint64_t mask) { sprite_hide = mask; }
 
 /* x0: screen x of out[0] (negative in widescreen) */
 static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
@@ -283,6 +285,7 @@ static void render_sprites(Vdc *d, int y, int x0, int w, uint16_t *out)
         bool xflip = (attr & 0x0800) != 0;
         uint16_t pal = (uint16_t)(0x100 | (attr & 0xF) << 4);
         uint16_t front = (attr & 0x80) ? 0x8000 : 0;
+        bool hidden = (sprite_hide >> i) & 1;
         for (int c = 0; c < sw; c++) {
             int x = sx + c;
             if (x < 0 || x >= w) continue;
@@ -296,7 +299,7 @@ static void render_sprites(Vdc *d, int y, int x0, int w, uint16_t *out)
             if (!col) continue;
             if (i == 0) spr0_drawn[x] = true;
             else if (spr0_drawn[x]) raise(d, VDC_ST_CR, (d->reg[R_CR] & 0x01) != 0);
-            if (!out[x]) out[x] = (uint16_t)(front | pal | col);
+            if (!out[x] && !hidden) out[x] = (uint16_t)(front | pal | col);
         }
     }
 }

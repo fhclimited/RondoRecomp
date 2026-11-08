@@ -30,6 +30,7 @@
 #include "theme.h"
 #include "video.h"
 #include "wide.h"
+#include "prompt.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
 #define AUDIO_RATE 44100
@@ -144,11 +145,14 @@ static GameWatch gw;
 static char pref_dir[1024];
 static bool no_save_files;   /* test runs: fresh backup RAM, nothing written to bram.bin */
 static Wide wide;            /* widescreen: decided before every frame */
+static TitlePrompt prompt;   /* the title's PUSH RUN BUTTON! as this PC's button (pad set per frame) */
 
 static void run_frame(void)
 {
     wide_frame(&wide, &pce);
+    prompt_before_frame(&prompt, &pce);
     pce_run_frame(&pce);
+    prompt_after_frame(&prompt, &pce);
 }
 
 typedef struct Session {
@@ -640,6 +644,7 @@ int main(int argc, char **argv)
             }
         }
 
+        prompt.pad = input_pad_last(&in);
         GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives, set.maria_unlocked, set.play_maria};
         {   /* widescreen fills the window's shape */
             int ww, wh;
@@ -859,6 +864,8 @@ int main(int argc, char **argv)
             screenshot(ren, path);
             TLOG("features: Stage 1 at frame %llu drawn %d px wider on each side (game changes %s)\n",
                  (unsigned long long)pce.frame, pce.vdc.fb_wide, wide.patched ? "in place" : "missing");
+            TLOG("features: title screen's PUSH RUN BUTTON! %s (%d frames, as the %s)\n",
+                 prompt.frames ? "replaced" : "NOT REPLACED", prompt.frames, prompt.pad ? "controller's" : "keyboard's");
         }
         if (menu.open != cursor_shown) {           /* the mouse pointer only over menus */
             cursor_shown = menu.open;

@@ -163,6 +163,17 @@ exact values in the facing direction are scaled by 2.3 / 1.25 (SotN's run agains
 which equals Rondo's), and the walk animation's frame timer gets an extra step on 5 frames
 of 6. The game's own movement code then handles walls, stairs and the camera.
 
+The title screen's prompt (`prompt.c`): the game's "PUSH RUN BUTTON!" (six sprites in
+palette 7 at Y 136, the same on both discs) reads "PUSH START BUTTON!" with a controller
+and "PUSH ENTER KEY!" on the keyboard (`input_pad_last`: the kind of device pressed last; a
+controller if one is connected and nothing has been pressed yet). Before each frame of state
+`$02`, if the six sprites are in the sprite table, they are left out of that frame's picture
+(`vdc_set_sprite_hide`, host side: they still count as drawn for the line limit and sprite
+0's collision, so nothing the game can see changes); after it the new line is drawn into the
+picture in the game's own letters, cut from those sprites' patterns in VRAM, with A, E, K
+and Y drawn in the same style in `prompt.c`. Its colours come from the palette as it is, so
+it fades with the title. No game graphics are kept in the source.
+
 Widescreen (`wide.c`, `runtime/pce/video.c`; an experimental option, off by default:
 `experimental_widescreen` in settings.ini): the VDC renders `vdc.wide` extra pixels on
 each side of a 256-pixel picture (background from the 512-pixel map, sprites with 10-bit X
@@ -251,7 +262,8 @@ work-RAM bytes whenever one changes), `--poke ADDR=VAL` (write before every fram
 FRAME:FILE`, `--ram-trace FILE` (work RAM + pad after every frame, for offline searches),
 `--cheats health,hearts,lives,maria,play-maria` and `--skip-cinematics` (the frontend's
 `game.c`), `--run FRAME:LEN` (hold the run button), `--wide N` (widescreen, N pixels a side),
-`--wide-report FRAME` (which widescreen patches are in), `--write-watch ADDR,...` (which
+`--wide-report FRAME` (which widescreen patches are in), `--prompt pad|keys` (the title's
+prompt as rondo.exe shows it), `--write-watch ADDR,...` (which
 instruction changes those work-RAM bytes; interpreter), `--vram-watch LO:HI` (which
 instructions write that VRAM range), `--dump-mem FRAME:FILE` (all 256 banks + MPRs, for
 disassembly), `--dump-vram FRAME:FILE`, `--dump-adpcm FRAME:FILE` (the 64 KiB of ADPCM RAM), `--dump-sat FRAME` (sprite table), `--scroll-log FILE`

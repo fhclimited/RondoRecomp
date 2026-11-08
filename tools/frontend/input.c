@@ -14,7 +14,10 @@ void input_init(Input *in)
     SDL_JoystickID *ids = SDL_GetGamepads(&n);   /* controllers already connected */
     for (int i = 0; i < n && i < 8; i++) in->pads[i] = SDL_OpenGamepad(ids[i]);
     SDL_free(ids);
+    in->pad_last = n > 0;
 }
+
+bool input_pad_last(const Input *in) { return in->pad_last; }
 
 void input_close(Input *in)
 {
@@ -26,15 +29,26 @@ void input_close(Input *in)
 void input_device_event(Input *in, const SDL_Event *ev)
 {
     if (ev->type == SDL_EVENT_GAMEPAD_ADDED) {
+        in->pad_last = true;
         if (SDL_GetGamepadFromID(ev->gdevice.which)) return;
         for (int i = 0; i < 8; i++)
             if (!in->pads[i]) { in->pads[i] = SDL_OpenGamepad(ev->gdevice.which); break; }
     } else if (ev->type == SDL_EVENT_GAMEPAD_REMOVED) {
-        for (int i = 0; i < 8; i++)
+        bool any = false;
+        for (int i = 0; i < 8; i++) {
             if (in->pads[i] && SDL_GetGamepadID(in->pads[i]) == ev->gdevice.which) {
                 SDL_CloseGamepad(in->pads[i]);
                 in->pads[i] = NULL;
             }
+            any |= in->pads[i] != NULL;
+        }
+        if (!any) in->pad_last = false;
+    } else if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        in->pad_last = true;
+    } else if (ev->type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+        if (ev->gaxis.value > STICK || ev->gaxis.value < -STICK) in->pad_last = true;
+    } else if (ev->type == SDL_EVENT_KEY_DOWN || ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        in->pad_last = false;
     }
 }
 

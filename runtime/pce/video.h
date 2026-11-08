@@ -87,3 +87,7 @@ const uint16_t *vdc_row_scroll(void);
 const uint8_t *vdc_row_bg_blank(void);
 const uint8_t *vdc_row_bg_edge(void);
 void vdc_set_row_clip(const uint8_t *rows);
+/* Sprites (a bit per sprite table entry) left out of the picture from now on; 0 = none.
+ * They still count towards each line's 16 and sprite 0's collision, as if drawn: only
+ * their pixels are not put in the picture. Host side, like the above. */
+void vdc_set_sprite_hide(uint64_t mask);

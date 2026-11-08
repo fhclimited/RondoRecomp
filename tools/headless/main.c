@@ -12,6 +12,7 @@
 #include "pce/state.h"
 #include "../frontend/game.h"
 #include "../frontend/wide.h"
+#include "../frontend/prompt.h"
 #include "recomp/recomp.h"
 #include "../recomp/capture_script.h"
 #include "util/png.h"
@@ -164,6 +165,7 @@ int main(int argc, char **argv)
     FILE *ram_trace = NULL;   /* --ram-trace FILE: WRAM after every frame */
     long start_frame = 0;
     int wide = 0;   /* --wide N: widescreen extension in pixels per side */
+    int prompt_dev = -1;   /* --prompt pad|keys: the title's PUSH RUN BUTTON! as rondo.exe shows it */
     long vram_dump_at = -1;            /* --dump-vram FRAME:FILE: all of VRAM after that frame */
     long adpcm_dump_at = -1;           /* --dump-adpcm FRAME:FILE: the 64 KiB of ADPCM RAM */
     char adpcm_dump_path[256] = "";
@@ -230,6 +232,7 @@ int main(int argc, char **argv)
                 ww_addr[n_ww++] = (unsigned)strtoul(t, NULL, 16) & 0x1FFF;
         }
         else if (!strcmp(argv[i], "--wide") && i + 1 < argc) wide = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--prompt") && i + 1 < argc) prompt_dev = !strcmp(argv[++i], "pad");
         else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &vram_dump_at, vram_dump_path);
         else if (!strcmp(argv[i], "--dump-adpcm") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &adpcm_dump_at, adpcm_dump_path);
         else if (!strcmp(argv[i], "--wide-skip") && i + 1 < argc) {   /* leave patches out: list of indexes */
@@ -317,6 +320,7 @@ int main(int argc, char **argv)
     }
     game_watch_reset(&gw, &pce);
     Wide wd = {.want = wide};
+    TitlePrompt tp = {.pad = prompt_dev == 1};
     for (int i = 0; i < n_ww; i++) ww_last[i] = pce.wram[ww_addr[i]];
     uint8_t ram_last[32];
     for (int i = 0; i < n_ram; i++) ram_last[i] = pce.wram[ram_addr[i]];
@@ -343,7 +347,9 @@ int main(int argc, char **argv)
         for (int i = 0; i < n_poke; i++) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
         if (skip_cine && game_in_cinematic(&pce)) { pce.pad = 0; skipped++; }
         wide_frame(&wd, &pce);
+        if (prompt_dev >= 0) prompt_before_frame(&tp, &pce);
         pce_run_frame(&pce);
+        if (prompt_dev >= 0) prompt_after_frame(&tp, &pce);
         game_apply_cheats(&pce, &cheats, &gw);
         {
             bool run = false;

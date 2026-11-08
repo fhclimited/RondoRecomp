@@ -35,12 +35,16 @@ typedef struct Input {
     int q_len, q_pos, q_left;
     int stick_dir;             /* menu: last stick direction (edge detection) */
     Uint64 stick_next;         /* menu: auto-repeat time */
+    bool pad_last;             /* a controller was used last (else the keyboard or mouse) */
 } Input;
 
 void input_init(Input *in);
 void input_close(Input *in);
-/* Gamepads coming and going. */
+/* Gamepads coming and going, and which kind of device is in use (every event). */
 void input_device_event(Input *in, const SDL_Event *ev);
+/* A controller is the device in use: one was pressed last, or one was connected (at start
+ * or since) and the keyboard or mouse has not been used after it. */
+bool input_pad_last(const Input *in);
 /* The PC Engine pad for this frame, macros applied. */
 uint8_t input_game(Input *in);
 /* Forget held macros (menu opened, state loaded). */
