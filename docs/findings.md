@@ -179,38 +179,6 @@ Forcing $9F = 1 before Stage 0 loads plays the Prologue as Maria.
   X + 32 negative are dropped at 72:8127, those with X + 32 below a size-dependent bound
   ($81A1,X) at 72:813A.
 
-## Rooms (remaster mode)
-
-Each stage's overlay keeps its rooms in tables (Stage 1, bank $6B; read by the room loader at
-6B:8889 and the entry loader at 6B:8952):
-
-- zp `$82` is the room, `$83` the entry (where the player comes in). A room's grid of screens
-  (`$1D00`, 16 x 16 pages of 256 x 256 pixels, a screen number each, 0 = none) is unpacked
-  from `$9C30 + 2 * room`: a start index, then screen numbers; one with bit 7 set ends a run
-  and the next byte is a new start index; `$FF` ends.
-- An entry (`$9C71 + 2 * entry`, 14 bytes): camera X page, Y page, X low, Y low, `$3EB6`,
-  `$3E66`, the camera's left, right, top and bottom pages (`$1EBE`, `$1EC6`, `$1ECE`,
-  `$1ED6`), the player's screen X and Y (X 0: keep the camera), the room-start drawing
-  variant (`$45`), the player's facing.
-- Stage 1 has three rooms: the street (camera 0-1024), the staircase house (its camera
-  unlocks as you climb) and the town beyond. Moving between them is the stage's own code:
-  the street's handler starts the next room (`INC $82`, entry from `$9C20 + room`) when the
-  player reaches screen X 240 at the camera's right limit; doors set the entry from `$8C`.
-  No CD access: the next room's tiles are unpacked from RAM (bank $6C code).
-- A grid can hold screens the camera never shows from that entry (the street's grid goes on
-  into a later boss arena, room 3 uses the same grid); what the camera can reach is its
-  limits.
-- Drawing (bank $6F, the column streamer at 6F:A7A5): a screen number gives 64 block
-  numbers (8 x 8 blocks of 32 pixels) at `S + screen * 64` and 8 bytes of their ninth bits
-  (a bit per column) at `B + screen * 8`; a block is 4 x 4 background map words (32 bytes) at
-  `C + block * 32` in bank `$DB + K + ninth bit`. For Stage 1, S = $A9EC, B = $AFEC (both in
-  bank $6F), C = $C000, K = $0B. All of a room's tiles are in VRAM while it is played.
-- The camera: the logic runs from vblank into the next frame's first lines, and moves the
-  camera on the way (layer 0's Y is set 64 px up at 6F:A6A1 and clamped back at 6F:A384, two
-  lines later). The frame is drawn from a copy taken as the logic starts (69:41FD): `$1E39`
-  X low, `$1E42` X page bit 0, `$1E54` Y low, `$1E5D` Y page bit 0.
-- The player (object slot 0): screen X `$0BC8` / `$0B70`, Y `$0CD0` / `$0C78`.
-
 ## Open questions
 
 - [ ] Role of track 22 / second `CD_BASE` (error-retry mirror?) and which track carries the translation

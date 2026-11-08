@@ -9,14 +9,11 @@ enum { SIDES_BLUR, SIDES_BLACK, SIDES_COUNT };
 enum { SCALE_FIT, SCALE_WHOLE, SCALE_COUNT };
 enum { SKIP_START, SKIP_AUTO, SKIP_OFF, SKIP_COUNT };
 enum { LANG_EN, LANG_JA, LANG_COUNT };
-/* Classic: the original 4:3 picture. Remaster: widescreen with the rooms around the one
- * being played drawn in and room changes stitched together (world.h), and a map. */
-enum { MODE_CLASSIC, MODE_REMASTER, MODE_COUNT };
 
 typedef struct Settings {
     /* video */
     bool fullscreen;
-    int mode;              /* MODE_* */
+    bool widescreen;       /* experimental: show more of the level on wide screens (off by default) */
     int aspect;            /* ASPECT_* */
     int scaling;           /* SCALE_*: fit the screen, or whole multiples only */
     int filter;            /* FILTER_* */

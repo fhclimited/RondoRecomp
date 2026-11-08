@@ -18,18 +18,12 @@ typedef struct Video {
     SDL_Texture *blur_a, *blur_b;
     int src_w, src_h;
     int src_wide;                /* extra pixels on each side of a 256-pixel picture */
-    /* drawn instead of `frame` when set (remaster mode's canvas, worldview.h) */
-    SDL_Texture *source;
-    int source_w, source_h, source_wide;
 } Video;
 
 bool video_init(Video *v, SDL_Renderer *ren);
 void video_free(Video *v);
 /* Upload a new picture (ARGB8888, pitch in pixels); `wide` = widescreen extension per side. */
 void video_upload(Video *v, const uint32_t *fb, int w, int h, int pitch, int wide);
-/* Show `tex` (w x h, `wide` pixels added each side of 256) instead of the uploaded picture
- * from now on; NULL goes back to the picture. */
-void video_set_source(Video *v, SDL_Texture *tex, int w, int h, int wide);
 /* Width / height of the screen area a 256-pixel-wide picture is shown in (4:3, or square
  * pixels), for working out how much widescreen fills the window. */
 double video_picture_aspect(const Video *v, const Settings *s);

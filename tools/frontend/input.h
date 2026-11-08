@@ -11,7 +11,6 @@
  *   Pause (RUN)  Start                Enter
  *   Menu         Back / View          F1 or Esc
  *   Rewind       hold LT              hold R
- *   Map          RT / right stick     M or Tab   (Remaster mode)
  *
  * Sub-weapon and backflip are short input sequences ("macros") the game itself reads as
  * Up + II and as a second press of I early in a jump (it needs each press held for 3+
@@ -36,7 +35,6 @@ typedef struct Input {
     int q_len, q_pos, q_left;
     int stick_dir;             /* menu: last stick direction (edge detection) */
     Uint64 stick_next;         /* menu: auto-repeat time */
-    bool rt_held;              /* map: RT was pulled last time it was polled */
 } Input;
 
 void input_init(Input *in);
@@ -50,10 +48,6 @@ void input_cancel_macros(Input *in);
 bool input_rewind_held(const Input *in);
 /* Run button held (LB / S): the frontend speeds the walk up (game_apply_run). */
 bool input_run_held(const Input *in);
-/* The map (remaster mode): M or Tab, the right stick's button (events), or RT (polled:
- * true once per pull). */
-bool input_is_map(const SDL_Event *ev);
-bool input_map_trigger(Input *in);
 /* START / Enter pressed (event) — skips a cinematic. */
 bool input_is_start(const SDL_Event *ev);
 /* Menu navigation from an event, and from the left stick (polled each frame). */

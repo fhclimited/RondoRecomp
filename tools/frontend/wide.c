@@ -202,6 +202,7 @@ int wide_extent(double window_aspect, double picture_aspect)
 #define OBJ_XH 0x0B70
 #define OBJ_TYPE 0x0A10
 #define HUD_SLOT 0x57        /* the HUD (health, hearts, score): type 5, screen X 8 */
+#define SUBWEAPON_SLOT 0x56  /* the sub-weapon icon hanging from the HUD: type 3, screen X 28 */
 #define OBJ_FRAME 0x0A68     /* sprite frame drawn; 0 = none */
 
 /* Some objects are generators fixed to the screen at the old spawn edge (e.g. Stage 1's
@@ -225,17 +226,27 @@ static void move_generators(Pce *p, bool on)
     }
 }
 
-/* Keep the HUD at the left edge of the picture: screen X 8 - extension. */
-static void place_hud(Wide *w, Pce *p, int ext)
+/* Move one HUD object to its place at the left edge: its original screen X - extension.
+ * Only if it is the HUD's (its type) and where the game or we put it. */
+static void place_hud_object(Pce *p, int slot, uint8_t type, int home, int ext, int *moved_to)
 {
     uint8_t *r = p->wram;
-    if (r[OBJ_TYPE + HUD_SLOT] != 0x05) return;
-    int x = (int16_t)(r[OBJ_XL + HUD_SLOT] | r[OBJ_XH + HUD_SLOT] << 8);
-    if (x != 8 && x != w->hud_x) return;      /* not where we or the game put it */
-    int to = 8 - ext;
-    r[OBJ_XL + HUD_SLOT] = (uint8_t)to;
-    r[OBJ_XH + HUD_SLOT] = (uint8_t)(to >> 8);
-    w->hud_x = to;
+    if (r[OBJ_TYPE + slot] != type) return;
+    int x = (int16_t)(r[OBJ_XL + slot] | r[OBJ_XH + slot] << 8);
+    if (x != home && x != *moved_to) return;
+    int to = home - ext;
+    r[OBJ_XL + slot] = (uint8_t)to;
+    r[OBJ_XH + slot] = (uint8_t)(to >> 8);
+    *moved_to = to;
+}
+
+/* Keep the HUD at the left edge of the picture: the frame (health, hearts, score) and the
+ * sub-weapon icon that hangs from it, both set up by each stage as it starts (the stage's
+ * title letters, slots $54-$55, are not the HUD's and stay centred). */
+static void place_hud(Wide *w, Pce *p, int ext)
+{
+    place_hud_object(p, HUD_SLOT, 0x05, 8, ext, &w->hud_x);
+    place_hud_object(p, SUBWEAPON_SLOT, 0x03, 28, ext, &w->subweapon_x);
 }
 
 /* ---- the room ----------------------------------------------------------------------- */
@@ -373,7 +384,8 @@ void wide_frame(Wide *w, Pce *p)
         int16_t x = (int16_t)(r[OBJ_XL + i] | r[OBJ_XH + i] << 8);
         w->obj_still[i] = x == w->obj_x[i] ? (uint8_t)(w->obj_still[i] < 255 ? w->obj_still[i] + 1 : 255) : 0;
         w->obj_x[i] = x;
-        bool parked = any_parked && i != HUD_SLOT && r[OBJ_FRAME + i] && x < 0 && w->obj_still[i] >= PARKED_FRAMES;
+        bool parked = any_parked && i != HUD_SLOT && i != SUBWEAPON_SLOT && r[OBJ_FRAME + i] && x < 0 &&
+                      w->obj_still[i] >= PARKED_FRAMES;
         if (table) table[i] = parked;
     }
 

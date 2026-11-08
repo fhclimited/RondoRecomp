@@ -35,7 +35,6 @@ Run           hold LB               hold S
 Pause         Start                 Enter
 Menu          Back / View           F1 or Esc
 Rewind        hold LT               hold R
-Map           RT / right stick      M or Tab   (Remaster mode)
 Save state                          F5
 Load state                          F8
 State slot                          F6 / F7 (slots 1-9)
@@ -66,7 +65,8 @@ F1, Esc or the controller's Back button pauses the game and opens the menu: save
 states, choose the slot, reset, back to the start screen, quit, and:
 
 Video      Fullscreen (uses the screen's own resolution, e.g. 4K)
-           Mode: Classic or Remaster; see below (also on the start screen)
+           Widescreen (experimental): More of the level, or Off (4:3, the default);
+           see below
            Aspect ratio: 4:3 (as on a TV), square pixels, or stretched to fill the screen
            Size: Fit screen (as big as the screen allows), or Whole multiples (every game
            pixel the same size; leaves a border)
@@ -86,34 +86,21 @@ Language   English patch or Japanese original (each is its own disc; see below)
 
 Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini.
 
-Classic and Remaster
---------------------
-Classic is the game as it was: the 4:3 picture, filling the screen's height (with a
-blurred copy or black beside it), with square pixels, or stretched to fill the window
-(Video > Aspect ratio).
-
-Remaster fills a wide screen with the level:
-- Where the camera scrolls, the game draws more of the level on both sides: the
-  background, enemies (they appear and move further out, where they are in the level) and
-  items, with the score display moved to the left edge. Up to 21:9 (about 112 extra game
-  pixels each side) is the game itself.
-- Around that, the rooms next door are drawn in: each stage's rooms are laid side by side
-  the way the game takes you between them (the end of Stage 1's burning street joins the
-  staircase house), so beyond a room's walls, or beside a room that does not scroll (a
-  vertical shaft, a boss room), you see the room you came from or are going to. A room
-  change glides across instead of cutting. These pictures fill in as you play: a room you
-  have not been to yet is dark until you have, and everything you have seen is kept (with
-  your saves), so on your next visit the stage is drawn in from the start. What is drawn
-  this way is a picture of the room's background; the enemies in it come to life as the
-  camera reaches them, as in the game.
-- The map: RT (or M / Tab) pauses the game, blurs it softly and shows the stage's map:
-  the rooms you have been through in grey with white outlines (the parts of the room you
-  have seen lighter), and you as a blinking yellow dot. Press it again (or B / Esc / Start)
-  to go on. The map is saved too.
-Turning Remaster on takes effect from the next room. Where the game parks something just
+Widescreen (experimental)
+-------------------------
+Off by default: the game is its original 4:3 picture (Video > Aspect ratio fills the screen's
+height, uses square pixels or stretches it). Widescreen is experimental: the game was not made
+for it, so expect graphical glitches here and there (things appearing or vanishing at the
+edges, odd bits of background); turn it off if something looks wrong.
+On 16:9 and ultrawide screens the game draws more of the level on both sides: the
+background, enemies (they appear and move further out, where they are in the level) and
+items, with the score display moved to the left edge. Up to 21:9 (about 112 extra game
+pixels each side) is covered; wider screens get the rest beside the picture.
+Rooms the camera does not scroll through sideways (vertical shafts, boss rooms) keep the
+original 4:3 picture, as do cinematics and menus. Beyond the walls of a room is black.
+Turning widescreen on takes effect from the next room. Where the game parks something just
 off its 4:3 screen to bring it on later (the Prologue's carriage waits off the left edge
-while the forest goes by), it stays out of sight until it comes in. Cinematics and menus
-keep the original picture.
+while the forest goes by), it stays out of sight until it comes in.
 
 Your own icon
 -------------

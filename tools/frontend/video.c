@@ -38,29 +38,6 @@ void video_upload(Video *v, const uint32_t *fb, int w, int h, int pitch, int wid
     v->src_wide = wide;
 }
 
-void video_set_source(Video *v, SDL_Texture *tex, int w, int h, int wide)
-{
-    v->source = tex;
-    v->source_w = w;
-    v->source_h = h;
-    v->source_wide = wide;
-}
-
-/* what is drawn: the uploaded picture, or the source set instead */
-static SDL_Texture *pic(const Video *v, int *w, int *h, int *wide)
-{
-    if (v->source) {
-        *w = v->source_w;
-        *h = v->source_h;
-        *wide = v->source_wide;
-        return v->source;
-    }
-    *w = v->src_w;
-    *h = v->src_h;
-    *wide = v->src_wide;
-    return v->frame;
-}
-
 double video_picture_aspect(const Video *v, const Settings *s)
 {
     return s->aspect == ASPECT_SQUARE ? 256.0 / (double)v->src_h : 4.0 / 3.0;
@@ -69,13 +46,11 @@ double video_picture_aspect(const Video *v, const Settings *s)
 /* Where the picture goes in a ww x wh window. */
 static SDL_FRect place(const Video *v, const Settings *s, int ww, int wh)
 {
-    int pw, ph, pwide;
-    pic(v, &pw, &ph, &pwide);
-    float sw = (float)pw, sh = (float)ph;
+    float sw = (float)v->src_w, sh = (float)v->src_h;
     if (s->aspect == ASPECT_STRETCH) return (SDL_FRect){0, 0, (float)ww, (float)wh};
     /* aspect of the whole picture: a TV's 4:3 (for the 256 pixels the game normally
      * shows; widescreen adds to the width at the same pixel shape), or square pixels */
-    float base = sw - 2.0f * (float)pwide;
+    float base = sw - 2.0f * (float)v->src_wide;
     float ar = s->aspect == ASPECT_SQUARE ? sw / sh : 4.0f / 3.0f * sw / base;
     float dh = (float)wh, dw = dh * ar;
     if (dw > (float)ww) { dw = (float)ww; dh = dw / ar; }
@@ -96,12 +71,10 @@ static SDL_FRect place(const Video *v, const Settings *s, int ww, int wh)
  * of the way smoothly, so pixels stay crisp but all come out the same size. */
 static SDL_Texture *sharp_copy(Video *v, float dw, float dh)
 {
-    int pw, ph, pwide;
-    SDL_Texture *from = pic(v, &pw, &ph, &pwide);
-    int k = (int)ceilf(fmaxf(dw / (float)pw, dh / (float)ph));
+    int k = (int)ceilf(fmaxf(dw / (float)v->src_w, dh / (float)v->src_h));
     if (k < 1) k = 1;
-    while (k > 1 && (pw * k > 8192 || ph * k > 8192)) k--;
-    int tw = pw * k, th = ph * k;
+    while (k > 1 && (v->src_w * k > 8192 || v->src_h * k > 8192)) k--;
+    int tw = v->src_w * k, th = v->src_h * k;
     if (!v->sharp || v->sharp_w != tw || v->sharp_h != th) {
         if (v->sharp) SDL_DestroyTexture(v->sharp);
         v->sharp = SDL_CreateTexture(v->ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, tw, th);
@@ -110,10 +83,10 @@ static SDL_Texture *sharp_copy(Video *v, float dw, float dh)
         v->sharp_w = tw;
         v->sharp_h = th;
     }
-    SDL_SetTextureScaleMode(from, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureScaleMode(v->frame, SDL_SCALEMODE_NEAREST);
     SDL_SetRenderTarget(v->ren, v->sharp);
-    SDL_FRect src = {0, 0, (float)pw, (float)ph};
-    SDL_RenderTexture(v->ren, from, &src, NULL);
+    SDL_FRect src = {0, 0, (float)v->src_w, (float)v->src_h};
+    SDL_RenderTexture(v->ren, v->frame, &src, NULL);
     SDL_SetRenderTarget(v->ren, NULL);
     return v->sharp;
 }
@@ -124,9 +97,7 @@ SDL_FRect video_draw(Video *v, const Settings *s)
     int ww, wh;
     SDL_GetRenderOutputSize(ren, &ww, &wh);
     SDL_FRect dst = place(v, s, ww, wh);
-    int pw, ph, pwide;
-    SDL_Texture *picture = pic(v, &pw, &ph, &pwide);
-    SDL_FRect src = {0, 0, (float)pw, (float)ph};
+    SDL_FRect src = {0, 0, (float)v->src_w, (float)v->src_h};
 
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
@@ -134,9 +105,9 @@ SDL_FRect video_draw(Video *v, const Settings *s)
     /* the sides of a wide screen: the picture itself, blurred and dimmed */
     bool covers = dst.x <= 0 && dst.y <= 0 && dst.w >= (float)ww && dst.h >= (float)wh;
     if (s->sides == SIDES_BLUR && !covers && v->blur_a && v->blur_b) {
-        SDL_SetTextureScaleMode(picture, SDL_SCALEMODE_LINEAR);
+        SDL_SetTextureScaleMode(v->frame, SDL_SCALEMODE_LINEAR);
         SDL_SetRenderTarget(ren, v->blur_a);
-        SDL_RenderTexture(ren, picture, &src, NULL);
+        SDL_RenderTexture(ren, v->frame, &src, NULL);
         SDL_SetRenderTarget(ren, v->blur_b);
         SDL_RenderTexture(ren, v->blur_a, NULL, NULL);
         SDL_SetRenderTarget(ren, NULL);
@@ -152,12 +123,11 @@ SDL_FRect video_draw(Video *v, const Settings *s)
     if (s->filter == FILTER_SHARP) {
         SDL_Texture *t = sharp_copy(v, dst.w, dst.h);
         if (t) SDL_RenderTexture(ren, t, NULL, &dst);
-        else SDL_RenderTexture(ren, picture, &src, &dst);
+        else SDL_RenderTexture(ren, v->frame, &src, &dst);
     } else {
-        SDL_SetTextureScaleMode(picture, s->filter == FILTER_SMOOTH ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
-        SDL_RenderTexture(ren, picture, &src, &dst);
+        SDL_SetTextureScaleMode(v->frame, s->filter == FILTER_SMOOTH ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+        SDL_RenderTexture(ren, v->frame, &src, &dst);
     }
-    SDL_SetTextureScaleMode(picture, SDL_SCALEMODE_NEAREST);
     return dst;
 }
 

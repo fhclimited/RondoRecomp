@@ -130,23 +130,6 @@ bool input_rewind_held(const Input *in)
     return false;
 }
 
-bool input_is_map(const SDL_Event *ev)
-{
-    if (ev->type == SDL_EVENT_KEY_DOWN)
-        return !ev->key.repeat && (ev->key.scancode == SDL_SCANCODE_M || ev->key.scancode == SDL_SCANCODE_TAB);
-    return ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && ev->gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK;
-}
-
-bool input_map_trigger(Input *in)
-{
-    bool held = false;
-    for (int i = 0; i < 8; i++)
-        if (in->pads[i] && SDL_GetGamepadAxis(in->pads[i], SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000) held = true;
-    bool pulled = held && !in->rt_held;
-    in->rt_held = held;
-    return pulled;
-}
-
 bool input_is_start(const SDL_Event *ev)
 {
     if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) return ev->gbutton.button == SDL_GAMEPAD_BUTTON_START;

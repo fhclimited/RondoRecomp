@@ -28,7 +28,7 @@ static const char *const OFF_ON[] = {"Off", "On"};
 static const char *const ASPECTS[] = {"4:3 (TV)", "Square pixels", "Stretch to fill"};
 static const char *const FILTERS[] = {"Sharp", "Nearest", "Smooth"};
 static const char *const SIDES[] = {"Blurred picture", "Black"};
-static const char *const MODES[] = {"Classic", "Remaster"};
+static const char *const WIDES[] = {"Off (4:3)", "More of the level"};
 static const char *const SCALINGS[] = {"Fit screen", "Whole multiples"};
 static const char *const SKIPS[] = {"Press START", "Automatically", "Never"};
 static const char *const LANGS[] = {"English patch", "Japanese original"};
@@ -59,7 +59,6 @@ static const Item MAIN_ITEMS[] = {
 };
 static const Item START_ITEMS[] = {
     {IT_ACTION, "Play", MENU_PLAY, 0, NULL, 0, 0, 0},
-    CHOICE("Mode", mode, MODES, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Language", language, LANGS, 0, MENU_LANGUAGE),
     {IT_ACTION, "Load state", MENU_LOAD_STATE, 0, NULL, 0, 0, 0},
     CHOICE("State slot", slot, SLOTS, 1, MENU_SETTINGS_CHANGED),
@@ -72,7 +71,7 @@ static const Item START_ITEMS[] = {
 };
 static const Item VIDEO_ITEMS[] = {
     TOGGLE("Fullscreen", fullscreen, MENU_VIDEO_CHANGED),
-    CHOICE("Mode", mode, MODES, 0, MENU_SETTINGS_CHANGED),
+    TOGGLE_NAMED("Widescreen (experimental)", widescreen, WIDES, MENU_SETTINGS_CHANGED),
     CHOICE("Aspect ratio", aspect, ASPECTS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Size", scaling, SCALINGS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Filter", filter, FILTERS, 0, MENU_SETTINGS_CHANGED),
@@ -106,7 +105,6 @@ static const Item CONTROL_ITEMS[] = {
     {IT_TEXT, "Pause\tSTART\tEnter", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Menu\tBACK\tF1 / Esc", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Rewind (hold)\tLT\tR", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Map (Remaster)\tRT\tM / Tab", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Save / load state\t\tF5 / F8", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Fullscreen\t\tF11", 0, 0, NULL, 0, 0, 0},
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
@@ -129,7 +127,7 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Language", "The English patch (fan translation) or the Japanese original: each is its own disc."},
     {"Load state", "Continue from the save state in the slot below (F8 in the game)."},
     {"State slot", "Which of the nine save-state slots to use (F6 / F7 in the game)."},
-    {"Video", "Fullscreen, Classic or Remaster, the picture's shape, size and filter."},
+    {"Video", "Fullscreen, the picture's shape, size and filter; experimental widescreen."},
     {"Gameplay", "Story scenes, rewind, volume and the start screen."},
     {"Cheats", "Infinite health, hearts and lives; Maria."},
     {"Controls", "The buttons and keys."},
@@ -140,7 +138,7 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Reset game", "Restart the game from power-on."},
     {"Start screen", "Leave the game for the start screen."},
     {"Fullscreen", "Use the whole screen at its own resolution (F11)."},
-    {"Mode", "Classic: the original 4:3 picture. Remaster: the rooms around you drawn in, stitched together, and a map."},
+    {"Widescreen (experimental)", "More of the level on wide screens. Experimental: expect graphical glitches."},
     {"Aspect ratio", "4:3 as on a TV, square pixels, or stretched to fill."},
     {"Size", "As big as the screen allows, or whole multiples only."},
     {"Filter", "Sharp: crisp, even pixels. Nearest: raw. Smooth: softened."},

@@ -87,14 +87,3 @@ const uint16_t *vdc_row_scroll(void);
 const uint8_t *vdc_row_bg_blank(void);
 const uint8_t *vdc_row_bg_edge(void);
 void vdc_set_row_clip(const uint8_t *rows);
-/* For remaster mode's panoramas (see tools/frontend/world.h):
- * - vdc_fb_bg: the last frame without its sprites (same layout as Vdc.fb); 0 (clear)
- *   beyond the room's walls in a widened picture, opaque black on a clipped band.
- * - vdc_row_y: the background map row (0-511) each displayed row was drawn from;
- *   vdc_row_bg_on: whether the background was switched on for it.
- * - vdc_set_wide_clear: leave the background beyond the room's walls clear (alpha 0) in
- *   Vdc.fb too, instead of black, so what is drawn under the picture shows there. */
-const uint32_t *vdc_fb_bg(void);
-const uint16_t *vdc_row_y(void);
-const uint8_t *vdc_row_bg_on(void);
-void vdc_set_wide_clear(bool clear);

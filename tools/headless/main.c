@@ -15,7 +15,6 @@
 #include "recomp/recomp.h"
 #include "../recomp/capture_script.h"
 #include "util/png.h"
-#include "../frontend/world.h"
 
 typedef struct { long frame; int len; uint8_t mask; } Press;
 
@@ -147,7 +146,7 @@ int main(int argc, char **argv)
     const char *bios_reset = NULL, *wav_path = NULL, *seeds_path = NULL, *misses_path = NULL;
     int verify = 0;
     bool no_native = false, use_script = false, mute_cd = false;
-    static Press presses[8192];
+    Press presses[64];
     int n_press = 0;
     /* investigation helpers: WRAM watch, pokes, save states, WRAM dumps */
     int n_ram = 0, n_poke = 0, n_dump = 0;
@@ -165,7 +164,7 @@ int main(int argc, char **argv)
     FILE *ram_trace = NULL;   /* --ram-trace FILE: WRAM after every frame */
     long start_frame = 0;
     int wide = 0;   /* --wide N: widescreen extension in pixels per side */
-    long vram_dump_at = -1;            /* --dump-vram FRAME:FILE: all of VRAM after that frame, then the 512 colours (ARGB) */
+    long vram_dump_at = -1;            /* --dump-vram FRAME:FILE: all of VRAM after that frame */
     long adpcm_dump_at = -1;           /* --dump-adpcm FRAME:FILE: the 64 KiB of ADPCM RAM */
     char adpcm_dump_path[256] = "";
     char vram_dump_path[256] = "";
@@ -176,9 +175,6 @@ int main(int argc, char **argv)
     long rows_from = -1, rows_to = -1;   /* --row-scroll A:B: each frame's bands of rows by X scroll */
     long sat_at[8]; /* --dump-sat FRAME: print the sprite table after that frame */
     int n_sat = 0;
-    const char *world_dir = NULL;   /* --world DIR: remaster mode's world; its pictures written there at the end */
-    static World world;
-    char world_event[160] = "";
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atol(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atol(argv[++i]);
@@ -268,19 +264,7 @@ int main(int argc, char **argv)
             if (sscanf(argv[++i], "%x:%x", &b, &a) == 2)
                 watch[n_watch++] = (typeof(watch[0])){(uint8_t)b, (uint16_t)a, -1};
         }
-        else if (!strcmp(argv[i], "--world") && i + 1 < argc) world_dir = argv[++i];
-        else if (!strcmp(argv[i], "--inputs") && i + 1 < argc) {
-            /* a file of presses, one per line: FRAME LEN BUTTONS (as --press) */
-            FILE *in = fopen(argv[++i], "r");
-            char line[256], btn[128];
-            long fr;
-            int len;
-            while (in && fgets(line, sizeof line, in) && n_press < 8192)
-                if (sscanf(line, "%ld %d %127s", &fr, &len, btn) == 3)
-                    presses[n_press++] = (Press){fr, len, parse_buttons(btn)};
-            if (in) fclose(in);
-        }
-        else if (!strcmp(argv[i], "--press") && i + 1 < argc && n_press < 8192) {
+        else if (!strcmp(argv[i], "--press") && i + 1 < argc && n_press < 64) {
             char spec[128], *a, *b;
             snprintf(spec, sizeof spec, "%s", argv[++i]);
             a = strchr(spec, ':');
@@ -326,12 +310,6 @@ int main(int argc, char **argv)
     if (no_native || seeds_path) recomp_set_enabled(false);   /* seeds: record every entry point */
     if (seeds_path) recomp_load_misses(seeds_path);
     if (prof || n_watch || trace_left || n_ww || scroll_log || vw_count) pce.on_step = step_hook;
-    if (world_dir) {
-        char mp[1100];
-        snprintf(mp, sizeof mp, "%s/map.txt", world_dir);
-        world_init(&world, mp);
-        vdc_set_wide_clear(true);
-    }
     if (load_state) {
         if (!pce_state_load(&pce, load_state, 0, err, sizeof err)) { fprintf(stderr, "load state: %s\n", err); return 1; }
         start_frame = (long)pce.frame;
@@ -365,16 +343,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < n_poke; i++) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
         if (skip_cine && game_in_cinematic(&pce)) { pce.pad = 0; skipped++; }
         wide_frame(&wd, &pce);
-        if (world_dir) world_before_frame(&world, &pce);
         pce_run_frame(&pce);
-        if (world_dir) {
-            world_after_frame(&world, &pce);
-            world_step_view(&world);
-            if (strcmp(world.last_event, world_event)) {
-                snprintf(world_event, sizeof world_event, "%s", world.last_event);
-                printf("world f%ld: %s (camera %d,%d)\n", f + 1, world_event, world.cam_x, world.cam_y);
-            }
-        }
         game_apply_cheats(&pce, &cheats, &gw);
         {
             bool run = false;
@@ -428,7 +397,7 @@ int main(int argc, char **argv)
             }
         if (vram_dump_at == f + 1) {
             FILE *vf = fopen(vram_dump_path, "wb");
-            if (vf) { fwrite(pce.vdc.vram, 2, 0x8000, vf); fwrite(pce.vce.argb, 4, 512, vf); fclose(vf); }
+            if (vf) { fwrite(pce.vdc.vram, 2, 0x8000, vf); fclose(vf); }
         }
         if (adpcm_dump_at == f + 1) {
             FILE *af = fopen(adpcm_dump_path, "wb");
@@ -506,28 +475,6 @@ int main(int argc, char **argv)
             printf("  %02X:%04X  %u\n", at >> 16, at & 0xFFFF, best);
             vw_count[at] = 0;
         }
-    }
-    if (world_dir) {
-        char path[1200];
-        for (int i = 0; i < world.n; i++) {
-            const WorldRoom *r = &world.rooms[i];
-            snprintf(path, sizeof path, "%s/room_%02X_%02X.png", world_dir, r->area, r->room);
-            int iw, ih;
-            uint32_t *img = world_room_image(&world, i, &iw, &ih);
-            if (img && png_write_argb(path, img, iw, ih, iw))
-                printf("world: room %02X:%02X %s at %d,%d -> %s\n", r->area, r->room, r->placed ? "placed" : "not placed",
-                       r->ox, r->oy, path);
-            free(img);
-        }
-        if (world.area != 0xFF) {
-            snprintf(path, sizeof path, "%s/stage_%02X.png", world_dir, world.area);
-            int iw, ih;
-            uint32_t *img = world_stage_image(&world, world.area, &iw, &ih);
-            if (img && png_write_argb(path, img, iw, ih, iw)) printf("world: stage %02X -> %s\n", world.area, path);
-            free(img);
-        }
-        printf("world: data drawing %s\n", world.data_ok ? "recognised" : "NOT recognised");
-        world_save(&world);
     }
     if (prof) {
         printf("Hottest PCs outside the idle loop:\n");
