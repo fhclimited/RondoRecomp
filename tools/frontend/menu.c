@@ -31,7 +31,7 @@ static const char *const SIDES[] = {"Blurred picture", "Black"};
 static const char *const WIDES[] = {"Off (4:3)", "More of the level"};
 static const char *const SCALINGS[] = {"Fit screen", "Whole multiples"};
 static const char *const SKIPS[] = {"Press START", "Automatically", "Never"};
-static const char *const LANGS[] = {"English", "Japanese"};
+static const char *const LANGS[] = {"English patch", "Japanese original"};
 static const char *const SLOTS[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
 static const char *const VOLUMES[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
 
@@ -113,18 +113,18 @@ static const Item CONTROL_ITEMS[] = {
 /* parent -1: a root (the in-game menu, the start screen); the option pages return to
  * whichever root opened them */
 static const struct { const char *title; const Item *items; int n; int parent; } PAGES[PAGE_COUNT] = {
-    {"PAUSED", MAIN_ITEMS, (int)(sizeof MAIN_ITEMS / sizeof MAIN_ITEMS[0]), -1},
-    {"VIDEO", VIDEO_ITEMS, (int)(sizeof VIDEO_ITEMS / sizeof VIDEO_ITEMS[0]), PAGE_MAIN},
-    {"GAMEPLAY", GAMEPLAY_ITEMS, (int)(sizeof GAMEPLAY_ITEMS / sizeof GAMEPLAY_ITEMS[0]), PAGE_MAIN},
-    {"CHEATS", CHEAT_ITEMS, (int)(sizeof CHEAT_ITEMS / sizeof CHEAT_ITEMS[0]), PAGE_MAIN},
-    {"CONTROLS", CONTROL_ITEMS, (int)(sizeof CONTROL_ITEMS / sizeof CONTROL_ITEMS[0]), PAGE_MAIN},
-    {"MAIN MENU", START_ITEMS, (int)(sizeof START_ITEMS / sizeof START_ITEMS[0]), -1},
+    {"Paused", MAIN_ITEMS, (int)(sizeof MAIN_ITEMS / sizeof MAIN_ITEMS[0]), -1},
+    {"Video", VIDEO_ITEMS, (int)(sizeof VIDEO_ITEMS / sizeof VIDEO_ITEMS[0]), PAGE_MAIN},
+    {"Gameplay", GAMEPLAY_ITEMS, (int)(sizeof GAMEPLAY_ITEMS / sizeof GAMEPLAY_ITEMS[0]), PAGE_MAIN},
+    {"Cheats", CHEAT_ITEMS, (int)(sizeof CHEAT_ITEMS / sizeof CHEAT_ITEMS[0]), PAGE_MAIN},
+    {"Controls", CONTROL_ITEMS, (int)(sizeof CONTROL_ITEMS / sizeof CONTROL_ITEMS[0]), PAGE_MAIN},
+    {"Main Menu", START_ITEMS, (int)(sizeof START_ITEMS / sizeof START_ITEMS[0]), -1},
 };
 
 /* What the selected item does: the footer's help line. */
 static const struct { const char *label, *help; } HELP[] = {
     {"Play", "Start the game: on from power-on to its title screen."},
-    {"Language", "English or Japanese: each language is its own disc."},
+    {"Language", "The English patch (fan translation) or the Japanese original: each is its own disc."},
     {"Load state", "Continue from the save state in the slot below (F8 in the game)."},
     {"State slot", "Which of the nine save-state slots to use (F6 / F7 in the game)."},
     {"Video", "Fullscreen, widescreen, the picture's shape, size and filter."},
@@ -263,13 +263,14 @@ static const char *item_help(int page, const Item *it)
 }
 
 /* Where everything goes for a page (layout units u: 1 at 960 x 540), shared by drawing and
- * the mouse. The start screen's own page has its panel on the right, the emblem and title
- * on the left; the others are one panel in the middle. */
+ * the mouse. The start screen's own page has its panel on the right, the rose window and the
+ * title on the left; the others are one panel in the middle. */
 typedef struct Frame {
     int w, h;
     float u, cx, cy;
-    float x0, x1, y0, y1;        /* the panel */
-    float head_y, div_y, foot_y; /* the header's middle, the dividers under it and above the footer */
+    float x0, x1, y0, y1;        /* the panel: y0 is its arch's apex */
+    float rise;                  /* the arch's height */
+    float title_y, sub_y, div_y, foot_y;
     float rows_top, row_h, text_px;
     bool start;
 } Frame;
@@ -282,24 +283,26 @@ static Frame frame_for(const Menu *m, SDL_Renderer *ren)
     F.cx = (float)F.w * 0.5f;
     F.cy = (float)F.h * 0.5f;
     F.start = m->page == PAGE_START;
-    /* as tall as the page needs (header, rows of 30, footer), at most 490 */
+    /* as tall as the page needs (arch and title, rows of 30, footer), at most 500 */
     int rows = PAGES[m->page].n;
-    float height = (60 + 30 + (float)(rows - 1) * 30 + 18 + 54 + 12) * u;
-    if (height > 490 * u) height = 490 * u;
+    float head = F.start ? 78 : 92;
+    float height = (head + 30 + (float)(rows - 1) * 30 + 18 + 54 + 12) * u;
+    if (height > 500 * u) height = 500 * u;
     F.x0 = F.start ? F.cx + 20 * u : F.cx - 300 * u;
     F.x1 = F.start ? F.cx + 440 * u : F.cx + 300 * u;
-    F.y0 = F.cy - height * 0.5f;
-    F.y1 = F.cy + height * 0.5f;
-    F.head_y = F.y0 + 31 * u;
-    F.div_y = F.y0 + 60 * u;
+    F.y0 = F.cy - height * 0.5f + 6 * u;
+    F.y1 = F.cy + height * 0.5f + 6 * u;
+    F.rise = 26 * u;
+    F.title_y = F.y0 + 50 * u;
+    F.sub_y = F.y0 + 75 * u;
+    F.div_y = F.y0 + head * u;
     F.foot_y = F.y1 - 54 * u;
     F.rows_top = F.div_y + 30 * u;
-    int n = PAGES[m->page].n;
     float span = (F.foot_y - 18 * u) - F.rows_top;
-    F.row_h = n > 1 ? span / (float)(n - 1) : 30 * u;
+    F.row_h = rows > 1 ? span / (float)(rows - 1) : 30 * u;
     if (F.row_h > 30 * u) F.row_h = 30 * u;
-    F.text_px = F.row_h * 0.64f;
-    if (F.text_px > 19 * u) F.text_px = 19 * u;
+    F.text_px = F.row_h * 0.62f;
+    if (F.text_px > 18 * u) F.text_px = 18 * u;
     return F;
 }
 
@@ -338,42 +341,17 @@ MenuResult menu_click(Menu *m, Settings *s, int item)
     return menu_nav(m, s, NAV_OK);
 }
 
-/* The panel opens out from its middle; a sweep line drifts down it. */
-static void draw_panel(SDL_Renderer *ren, const Frame *F, float pop, float t)
+/* The title (blackletter) under the arch's apex, a line naming the game on the in-game
+ * pages, the ornamented divider. */
+static void draw_header(SDL_Renderer *ren, const Frame *F, const char *title, bool game_line, float a)
 {
-    float u = F->u, mid = (F->y0 + F->y1) * 0.5f;
-    float y0 = mid - (mid - F->y0) * pop, y1 = mid + (F->y1 - mid) * pop;
-    th_panel(ren, F->x0, y0, F->x1, y1, 24 * u, TH_PANEL_TOP, TH_PANEL_BOTTOM, th_alpha(TH_GOLD, 200), 1.6f * u);
-    th_scanlines(ren, F->x0 + 3, y0 + 3, F->x1 - 3, y1 - 3, 3.0f * u, th_alpha(TH_GOLD, 7));
-    th_brackets(ren, F->x0, y0, F->x1, y1, 30 * u, TH_CRIMSON, 2.2f * u);
-    if (pop >= 1.0f) {
-        float span = y1 - y0, sy = y0 - 30 * u + fmodf(t * 70.0f * u, span + 60 * u);
-        if (sy > y0 + 14 * u && sy < y1 - 4 * u) {
-            th_rect_v(ren, F->x0 + 2, sy - 10 * u, F->x1 - 2, sy, th_alpha(TH_GOLD, 0), th_alpha(TH_GOLD, 18));
-            th_line(ren, F->x0 + 2, sy, F->x1 - 2, sy, th_alpha(TH_GOLD, 36), 1.0f);
-        }
-    }
-}
-
-/* Emblem, title, two small lines on the right; a divider bright under the title with tick
- * marks after it. */
-static void draw_header(SDL_Renderer *ren, const Frame *F, const char *title, const char *right1, const char *right2,
-                        float t, float a)
-{
-    float u = F->u;
-    th_emblem(ren, F->x0 + 44 * u, F->head_y, 14 * u, t, a);
-    th_text(ren, TH_FONT_TITLE, 27 * u, F->x0 + 76 * u, F->head_y, th_fade(TH_TEXT, a), title, 0, 0.5f, 5 * u,
-            th_fade(th_alpha(TH_CRIMSON, 100), a));
-    if (right1)
-        th_text(ren, TH_FONT_UI, 12.5f * u, F->x1 - 28 * u, F->head_y - 8 * u, th_fade(TH_GOLD, a), right1, 1, 0.5f,
-                3 * u, TH_NONE);
-    if (right2)
-        th_text(ren, TH_FONT_UI, 10.5f * u, F->x1 - 28 * u, F->head_y + 9 * u, th_fade(TH_TEXT_DIM, a), right2, 1,
-                0.5f, 2.5f * u, TH_NONE);
-    th_line(ren, F->x0 + 18 * u, F->div_y, F->x1 - 18 * u, F->div_y, th_fade(th_alpha(TH_GOLD, 90), a), 1.0f * u);
-    th_line(ren, F->x0 + 18 * u, F->div_y, F->x0 + 230 * u, F->div_y, th_fade(th_alpha(TH_GOLD, 230), a), 2.0f * u);
-    for (float x = F->x0 + 250 * u; x < F->x1 - 20 * u; x += 22 * u)
-        th_line(ren, x, F->div_y, x, F->div_y + 5 * u, th_fade(th_alpha(TH_GOLD, 70), a), 1.0f);
+    float u = F->u, mx = (F->x0 + F->x1) * 0.5f;
+    th_text(ren, TH_FONT_TITLE, 34 * u, mx, F->title_y, th_fade(TH_TEXT, a), title, 0.5f, 0.5f, 1 * u,
+            th_fade(th_alpha(TH_CRIMSON, 120), a));
+    if (game_line)
+        th_text(ren, TH_FONT_UI, 10.5f * u, mx, F->sub_y, th_fade(TH_GOLD, a), "CASTLEVANIA  -  RONDO OF BLOOD", 0.5f,
+                0.5f, 3 * u, TH_NONE);
+    th_divider(ren, F->x0 + 22 * u, F->x1 - 22 * u, F->div_y, u, a);
 }
 
 /* A row of the controls table: columns separated by tabs; a first column left empty makes
@@ -391,8 +369,8 @@ static void draw_table_row(SDL_Renderer *ren, const Frame *F, float y, const cha
         memcpy(part, p, n);
         part[n] = 0;
         SDL_Color col = heading ? TH_GOLD : c == 0 ? TH_TEXT : TH_ACTION;
-        th_text(ren, TH_FONT_UI, heading ? px * 0.8f : px, cols[c], y, th_fade(col, a), part, 0, 0.5f,
-                heading ? 2.5f * u : 0, TH_NONE);
+        th_text(ren, heading ? TH_FONT_CAPS : TH_FONT_UI, heading ? px * 0.85f : px, cols[c], y, th_fade(col, a), part,
+                0, 0.5f, heading ? 2.0f * u : 0, TH_NONE);
         if (!e) break;
         p = e + 1;
     }
@@ -408,19 +386,24 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
         bool sel = i == m->sel[m->page] && selectable(it);
         bool action = it->kind == IT_ACTION || it->kind == IT_PAGE || it->kind == IT_BACK;
         if (sel) {
-            /* a bar of light fading to the right, a crimson edge, a chevron cursor */
-            th_rect_h(ren, F->x0 + 18 * u, y - half, F->x1 - 18 * u, y + half, th_fade(th_alpha(TH_GOLD, 64), a),
-                      th_fade(th_alpha(TH_GOLD, 6), a));
-            th_line(ren, F->x0 + 18 * u, y + half, F->x1 - 18 * u, y + half, th_fade(th_alpha(TH_GOLD, 110), a), 1.0f);
-            th_rect(ren, F->x0 + 18 * u, y - half, F->x0 + 22 * u, y + half, th_fade(TH_CRIMSON, a));
-            float bob = sinf(t * 7.0f) * 2.5f * u;
-            th_chevron(ren, F->x0 + 36 * u + bob, y, F->row_h * 0.38f, true, th_fade(TH_CRIMSON, a), 2.4f * u);
+            /* a bar of blood fading to the right between gold hairlines, a cross for a cursor */
+            th_rect_h(ren, F->x0 + 16 * u, y - half, F->x1 - 16 * u, y + half, th_fade(th_alpha(TH_CRIMSON, 150), a),
+                      th_fade(th_alpha(TH_CRIMSON, 8), a));
+            th_rect_h(ren, F->x0 + 16 * u, y - half, F->x1 - 16 * u, y - half + 1.0f, th_fade(th_alpha(TH_GOLD, 150), a),
+                      th_fade(th_alpha(TH_GOLD, 0), a));
+            th_rect_h(ren, F->x0 + 16 * u, y + half - 1.0f, F->x1 - 16 * u, y + half, th_fade(th_alpha(TH_GOLD, 150), a),
+                      th_fade(th_alpha(TH_GOLD, 0), a));
+            float bob = sinf(t * 6.0f) * 2.0f * u;
+            th_cross(ren, F->x0 + 34 * u + bob, y, F->row_h * 0.42f, th_fade((SDL_Color){255, 230, 156, 255}, a),
+                     th_fade((SDL_Color){190, 128, 44, 255}, a), th_fade((SDL_Color){60, 20, 10, 255}, a), 1.0f * u);
         } else if (it->kind != IT_TEXT) {
-            th_line(ren, F->x0 + 30 * u, y + F->row_h * 0.48f, F->x1 - 30 * u, y + F->row_h * 0.48f,
-                    th_fade(th_alpha(TH_GOLD, 20), a), 1.0f);
+            th_rect_h(ren, F->x0 + 30 * u, y + F->row_h * 0.48f, (F->x0 + F->x1) * 0.5f, y + F->row_h * 0.48f + 1.0f,
+                      th_alpha(TH_GOLD, 0), th_fade(th_alpha(TH_GOLD, 26), a));
+            th_rect_h(ren, (F->x0 + F->x1) * 0.5f, y + F->row_h * 0.48f, F->x1 - 30 * u, y + F->row_h * 0.48f + 1.0f,
+                      th_fade(th_alpha(TH_GOLD, 26), a), th_alpha(TH_GOLD, 0));
         }
         if (it->kind == IT_TEXT) {
-            draw_table_row(ren, F, y, it->label, F->text_px * 0.92f, a);
+            draw_table_row(ren, F, y, it->label, F->text_px * 0.95f, a);
             continue;
         }
         char label[96];
@@ -428,21 +411,20 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
         if (it->kind == IT_ACTION && (it->arg == MENU_SAVE_STATE || it->arg == MENU_LOAD_STATE))
             snprintf(label, sizeof label, "%s  (slot %d)", it->label, s->slot);
         bool value = it->kind == IT_CHOICE || it->kind == IT_TOGGLE;
-        float label_w = (F->x1 - F->x0) - (value ? 330 : 110) * u;
-        SDL_Color lc = sel ? (SDL_Color){255, 255, 255, 255} : action ? TH_ACTION : TH_TEXT;
-        th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, label, label_w, 0), F->x0 + 54 * u, y,
-                th_fade(lc, a), label, 0, 0.5f, 0, sel ? th_fade(th_alpha(TH_GOLD, 50), a) : TH_NONE);
+        float label_w = (F->x1 - F->x0) - (value ? 300 : 110) * u;
+        SDL_Color lc = sel ? (SDL_Color){255, 248, 232, 255} : action ? TH_ACTION : TH_TEXT;
+        th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, label, label_w, 0), F->x0 + 56 * u, y,
+                th_fade(lc, a), label, 0, 0.5f, 0, sel ? th_fade(th_alpha(TH_CRIMSON, 140), a) : TH_NONE);
         if (value) {
             const char *v = it->choices[get_value(s, it)];
-            th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, v, 170 * u, 0), F->x1 - 130 * u, y,
-                    th_fade(sel ? TH_GOLD : th_alpha(TH_GOLD, 200), a), v, 0.5f, 0.5f, 0,
-                    sel ? th_fade(th_alpha(TH_GOLD, 60), a) : TH_NONE);
-            SDL_Color arrow = th_fade(sel ? TH_GOLD : th_alpha(TH_GOLD, 70), a);
-            th_chevron(ren, F->x1 - 232 * u, y, F->row_h * 0.36f, false, arrow, 2.0f * u);
-            th_chevron(ren, F->x1 - 28 * u, y, F->row_h * 0.36f, true, arrow, 2.0f * u);
+            th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, v, 168 * u, 0), F->x1 - 120 * u, y,
+                    th_fade(sel ? (SDL_Color){255, 214, 120, 255} : th_alpha(TH_GOLD, 210), a), v, 0.5f, 0.5f, 0,
+                    TH_NONE);
+            SDL_Color arrow = th_fade(sel ? TH_GOLD : th_alpha(TH_GOLD, 80), a);
+            th_arrow(ren, F->x1 - 214 * u, y, F->row_h * 0.34f, false, arrow);
+            th_arrow(ren, F->x1 - 26 * u, y, F->row_h * 0.34f, true, arrow);
         } else if (it->kind == IT_PAGE) {
-            th_chevron(ren, F->x1 - 28 * u, y, F->row_h * 0.36f, true,
-                       th_fade(sel ? TH_GOLD : th_alpha(TH_GOLD, 110), a), 2.0f * u);
+            th_arrow(ren, F->x1 - 26 * u, y, F->row_h * 0.34f, true, th_fade(sel ? TH_GOLD : th_alpha(TH_GOLD, 120), a));
         }
     }
 }
@@ -450,40 +432,40 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
 /* What the selected item does (or the last message), then the buttons. */
 static void draw_footer(SDL_Renderer *ren, const Frame *F, const Menu *m, float a)
 {
-    float u = F->u, w = F->x1 - F->x0 - 48 * u, mx = (F->x0 + F->x1) * 0.5f;
-    th_line(ren, F->x0 + 18 * u, F->foot_y, F->x1 - 18 * u, F->foot_y, th_fade(th_alpha(TH_GOLD, 60), a), 1.0f);
+    float u = F->u, w = F->x1 - F->x0 - 56 * u, mx = (F->x0 + F->x1) * 0.5f;
+    th_rect_h(ren, F->x0 + 24 * u, F->foot_y, mx, F->foot_y + 1.0f, th_alpha(TH_GOLD, 0), th_fade(th_alpha(TH_GOLD, 110), a));
+    th_rect_h(ren, mx, F->foot_y, F->x1 - 24 * u, F->foot_y + 1.0f, th_fade(th_alpha(TH_GOLD, 110), a), th_alpha(TH_GOLD, 0));
     const Item *it = &PAGES[m->page].items[m->sel[m->page]];
     const char *help = m->status[0] ? m->status : selectable(it) ? item_help(m->page, it) : "";
-    th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 14.5f * u, help, w, 0), mx, F->foot_y + 17 * u,
+    th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 13.5f * u, help, w, 0), mx, F->foot_y + 18 * u,
             th_fade(m->status[0] ? TH_ACTION : TH_TEXT, a), help, 0.5f, 0.5f, 0, TH_NONE);
     const char *hint = m->page == PAGE_START
                            ? "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     START  PLAY"
                        : m->page == PAGE_MAIN
                            ? "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     B / ESC  RESUME"
                            : "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     B / ESC  BACK";
-    th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 10.5f * u, hint, w, 1.5f * u), mx, F->foot_y + 38 * u,
-            th_fade(TH_TEXT_DIM, a), hint, 0.5f, 0.5f, 1.5f * u, TH_NONE);
+    th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 9.5f * u, hint, w, 1.2f * u), mx, F->foot_y + 38 * u,
+            th_fade(TH_TEXT_DIM, a), hint, 0.5f, 0.5f, 1.2f * u, TH_NONE);
 }
 
-/* The start screen's left side: the emblem in its rings, the title, the disc. */
+/* The start screen's left side: the rose window, the title, the disc. */
 static void draw_start_title(SDL_Renderer *ren, const Frame *F, const Menu *m, float t, float a)
 {
     float u = F->u, x = F->cx - 230 * u, y = F->cy;
-    th_emblem(ren, x, y - 80 * u, 62 * u, t, a);
-    th_text(ren, TH_FONT_UI, 15 * u, x, y + 34 * u, th_fade(TH_GOLD, a), "CASTLEVANIA", 0.5f, 0.5f, 10 * u, TH_NONE);
-    float tp = th_fit(ren, TH_FONT_TITLE, 38 * u, "RONDO OF BLOOD", 400 * u, 3 * u);
-    th_text(ren, TH_FONT_TITLE, tp, x, y + 68 * u, th_fade(TH_TEXT, a), "RONDO OF BLOOD", 0.5f, 0.5f, 3 * u,
-            th_fade(th_alpha(TH_CRIMSON, 110), a));
-    float dy = y + 97 * u;
-    th_line(ren, x - 150 * u, dy, x + 150 * u, dy, th_fade(th_alpha(TH_GOLD, 120), a), 1.0f * u);
-    th_line(ren, x - 36 * u, dy, x + 36 * u, dy, th_fade(TH_CRIMSON, a), 2.2f * u);
-    th_text(ren, TH_FONT_UI, 11 * u, x, dy + 18 * u, th_fade(TH_TEXT_DIM, a), "RONDO RECOMP", 0.5f, 0.5f, 5 * u,
-            TH_NONE);
+    th_emblem(ren, x, y - 96 * u, 58 * u, t, a);
+    th_text(ren, TH_FONT_CAPS, th_fit(ren, TH_FONT_CAPS, 24 * u, "CASTLEVANIA", 380 * u, 5 * u), x, y + 10 * u,
+            th_fade(TH_GOLD, a), "CASTLEVANIA", 0.5f, 0.5f, 5 * u, th_fade(th_alpha((SDL_Color){0, 0, 0, 255}, 160), a));
+    float tp = th_fit(ren, TH_FONT_TITLE, 66 * u, "Rondo of Blood", 420 * u, 1 * u);
+    th_text(ren, TH_FONT_TITLE, tp, x, y + 58 * u, th_fade(TH_TEXT, a), "Rondo of Blood", 0.5f, 0.5f, 1 * u,
+            th_fade(th_alpha(TH_CRIMSON, 150), a));
+    th_divider(ren, x - 170 * u, x + 170 * u, y + 102 * u, u, a);
+    th_text(ren, TH_FONT_UI, 11 * u, x, y + 122 * u, th_fade(TH_TEXT_DIM, a), "RONDO RECOMP", 0.5f, 0.5f, 5 * u, TH_NONE);
     if (m->info[0][0])
-        th_text(ren, TH_FONT_UI, 12.5f * u, x, dy + 44 * u, th_fade(TH_GOLD, a), m->info[0], 0.5f, 0.5f, 1 * u, TH_NONE);
+        th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 12.5f * u, m->info[0], 420 * u, 0), x, y + 146 * u,
+                th_fade(TH_GOLD, a), m->info[0], 0.5f, 0.5f, 0, th_fade(th_alpha((SDL_Color){0, 0, 0, 255}, 150), a));
     if (m->info[1][0])
-        th_text(ren, TH_FONT_UI, 10.5f * u, x, dy + 62 * u, th_fade(TH_TEXT_DIM, a), m->info[1], 0.5f, 0.5f, 1 * u,
-                TH_NONE);
+        th_text(ren, TH_FONT_UI, 10 * u, x, y + 164 * u, th_fade(TH_TEXT_DIM, a), m->info[1], 0.5f, 0.5f, 0.5f * u,
+                th_fade(th_alpha((SDL_Color){0, 0, 0, 255}, 150), a));
 }
 
 void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
@@ -499,16 +481,19 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
     if (m->root == PAGE_START) {
         th_backdrop(ren, F.w, F.h, t);              /* the game is not running behind it */
     } else {
-        th_rect(ren, 0, 0, (float)F.w, (float)F.h, (SDL_Color){6, 1, 4, 175});
-        th_scanlines(ren, 0, 0, (float)F.w, (float)F.h, 3.0f * F.u, (SDL_Color){0, 0, 0, 45});
+        float fw = (float)F.w, fh = (float)F.h;
+        th_rect(ren, 0, 0, fw, fh, (SDL_Color){10, 1, 5, 178});
+        th_rect_h(ren, 0, 0, fw * 0.25f, fh, (SDL_Color){0, 0, 0, 120}, (SDL_Color){0, 0, 0, 0});
+        th_rect_h(ren, fw * 0.75f, 0, fw, fh, (SDL_Color){0, 0, 0, 0}, (SDL_Color){0, 0, 0, 120});
     }
     if (F.start) {
         float b = since * 2.0f;
         draw_start_title(ren, &F, m, t, b > 1 ? 1 : b);
     }
-    draw_panel(ren, &F, pop, t);
-    /* the start screen has the title beside its panel */
-    draw_header(ren, &F, PAGES[m->page].title, F.start ? NULL : "CASTLEVANIA", F.start ? NULL : "RONDO OF BLOOD", t, a);
+    /* the frame opens out from its middle */
+    float mid = (F.y0 + F.y1) * 0.5f;
+    th_frame(ren, F.x0, mid - (mid - F.y0) * pop, F.x1, mid + (F.y1 - mid) * pop, F.rise * pop, F.u, pop);
+    draw_header(ren, &F, PAGES[m->page].title, !F.start, a);
     draw_rows(ren, &F, m, s, t, a);
     draw_footer(ren, &F, m, a);
 }

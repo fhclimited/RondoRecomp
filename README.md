@@ -28,8 +28,8 @@ Findings so far: [docs/findings.md](docs/findings.md).
 - **Runtime:** HuC6280 interpreter (253/256 opcodes pass every SingleStepTests case), PC Engine
   video, sound (PSG effects, ADPCM voices, CD audio), backup RAM saves, save states, rewind,
   and the System Card functions the game uses, reimplemented in C (no BIOS needed).
-- A start screen before the game (Play, language, save states, options, Setup) and menus in
-  gold-and-crimson glass panels, with controller, keyboard and mouse.
+- A gothic start screen (a castle under a blood moon) and menus in arched gold-and-crimson
+  frames with blackletter titles, with controller, keyboard and mouse.
 - An in-game menu (F1 / Back): video modes for 4K, 16:9 and ultrawide screens (4:3 with
   blurred sides, square pixels, stretch, integer scaling, sharp filtering), cinematic
   skipping, cheats (infinite health, hearts, lives), modern controller layout with

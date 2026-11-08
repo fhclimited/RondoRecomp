@@ -48,18 +48,17 @@ static void show_osd(const char *fmt, ...)
     osd_until = SDL_GetTicks() + 2500;
 }
 
-/* A one-line notice on a small glass plate (theme.h): top centre (clear of the HUD on the
- * left), or bottom right. */
+/* A one-line notice on a plaque with pointed ends (theme.h): top centre (clear of the HUD
+ * on the left), or bottom right. */
 static void draw_banner(SDL_Renderer *ren, const char *text, bool bottom_right)
 {
     int ww, wh;
     SDL_GetRenderOutputSize(ren, &ww, &wh);
-    float u = th_unit(ww, wh), px = 15 * u, track = 1.5f * u;
-    float w = th_measure(ren, TH_FONT_UI, px, text, track) + 44 * u, h = 30 * u, m = 14 * u;
+    float u = th_unit(ww, wh), px = 14 * u, track = 1.0f * u, h = 30 * u, m = 14 * u;
+    float w = th_measure(ren, TH_FONT_UI, px, text, track) + h + 28 * u;
     float x = bottom_right ? (float)ww - w - m : ((float)ww - w) * 0.5f, y = bottom_right ? (float)wh - h - m : m;
-    th_panel(ren, x, y, x + w, y + h, 9 * u, TH_PANEL_TOP, TH_PANEL_BOTTOM, th_alpha(TH_GOLD, 190), 1.3f * u);
-    th_rect(ren, x + 8 * u, y + 8 * u, x + 11 * u, y + h - 8 * u, TH_CRIMSON);
-    th_text(ren, TH_FONT_UI, px, x + 22 * u, y + h * 0.5f, TH_TEXT, text, 0, 0.5f, track, TH_NONE);
+    th_plaque(ren, x, y, x + w, y + h, u, 1.0f);
+    th_text(ren, TH_FONT_UI, px, x + w * 0.5f, y + h * 0.5f, TH_TEXT, text, 0.5f, 0.5f, track, TH_NONE);
 }
 
 /* ---- choosing the disc image ------------------------------------------------------- */
@@ -223,25 +222,27 @@ static void switch_language(Session *ss, Settings *set, const char *main_disc, b
     int want = set->language;
     char disc[1024], err[256];
     bool have = disc_for(want, set, main_disc, disc, sizeof disc), picked = false;
-    const char *problem = want == LANG_JA ? "No Japanese disc installed" : "No English disc installed";
+    const char *problem = want == LANG_JA ? "The Japanese original is not installed"
+                                          : "The English patch is not installed";
     if (!have && ask) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Rondo Recomp",
             want == LANG_JA
-                ? "Japanese needs the original Japanese disc image (Akumajou Dracula X: Chi no Rondo).\n"
+                ? "The Japanese original is its own disc image (Akumajou Dracula X: Chi no Rondo).\n"
                   "Select its .cue file; it will be remembered.\n"
-                  "(Running Setup with its zip installs it next to the English one.)"
-                : "English needs the English (translated) disc image.\nSelect its .cue file; it will be "
-                  "remembered.\n(Running Setup with its zip installs it next to the Japanese one.)", win);
+                  "(Running Setup with its zip installs it next to the English patch.)"
+                : "The English patch is its own disc image (the fan translation).\nSelect its .cue file; "
+                  "it will be remembered.\n(Running Setup with its zip installs it next to the Japanese "
+                  "original.)", win);
         if (!pick_file(win, ren, disc, sizeof disc)) problem = "No disc chosen";
         else if (discid_identify(disc, NULL) == DISC_INVALID) problem = "That is not a PC Engine CD image";
         else if (disc_language(disc) != want)
-            problem = want == LANG_JA ? "That is the English disc" : "That is the Japanese disc";
+            problem = want == LANG_JA ? "That is the English patch" : "That is the Japanese original";
         else have = picked = true;
     }
     if (have && start_game(ss, disc, err, sizeof err)) {
         if (picked && want == LANG_JA) snprintf(set->disc_ja, sizeof set->disc_ja, "%s", disc);
         if (picked && want == LANG_EN) snprintf(set->disc_en, sizeof set->disc_en, "%s", disc);
-        snprintf(status, status_len, "Restarted in %s", want == LANG_JA ? "Japanese" : "English");
+        snprintf(status, status_len, "Restarted: the %s", want == LANG_JA ? "Japanese original" : "English patch");
     } else {
         snprintf(status, status_len, "%.100s", have ? err : problem);
     }
@@ -254,8 +255,8 @@ static void start_screen_info(Menu *m, const Session *ss, const Settings *set, c
     char other[1024];
     int o = ss->language == LANG_JA ? LANG_EN : LANG_JA;
     bool have = disc_for(o, set, main_disc, other, sizeof other);
-    snprintf(m->info[0], sizeof m->info[0], "%s disc - %s %s", ss->language == LANG_JA ? "Japanese" : "English",
-             o == LANG_JA ? "Japanese" : "English", have ? "also installed" : "not installed");
+    snprintf(m->info[0], sizeof m->info[0], "%s  -  %s %s", ss->language == LANG_JA ? "Japanese original" : "English patch",
+             o == LANG_JA ? "Japanese original" : "English patch", have ? "also installed" : "not installed");
     snprintf(m->info[1], sizeof m->info[1], "%s", recomp_build_id);
 }
 

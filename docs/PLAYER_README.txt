@@ -57,8 +57,7 @@ state, the option pages below, Setup (to add the other language's disc or rebuil
 rondo.exe closes so Setup can rebuild it) and Quit. Controller, keyboard and mouse all
 work; the line at the bottom of the menu says what the selected item does. Menu, Start
 screen comes back to it. Gameplay, Start screen at launch: Off goes straight into the
-game (rondo.exe --play does that once). The menus use the fonts that come with Windows
-(Bahnschrift, Palatino Linotype).
+game (rondo.exe --play does that once).
 
 Menu
 ----
@@ -82,7 +81,7 @@ Cheats     Infinite health, infinite hearts (always 99), infinite lives
            (and your save keeps it)
            Play as Maria: every stage is played as Maria, the Prologue too (starts from the
            next stage you enter)
-Language   English or Japanese (each is its own disc; see below)
+Language   English patch or Japanese original (each is its own disc; see below)
 
 Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini.
 

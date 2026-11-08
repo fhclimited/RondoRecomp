@@ -28,7 +28,7 @@
 #include "../recomp/gen.h"
 #include "zip.h"
 
-#define SETUP_VERSION "0.9"
+#define SETUP_VERSION "0.9.1"
 
 /* ---- output hooks (stdout for the command line; the GUI installs its own) ------------- */
 
@@ -432,7 +432,7 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
 static const char *lang_dir(DiscLanguage l) { return l == DISC_LANG_JA ? "ja" : "en"; }
 static const char *lang_name(DiscLanguage l)
 {
-    return l == DISC_LANG_JA ? "Japanese (the original release)" : "English (translated)";
+    return l == DISC_LANG_JA ? "the Japanese original" : "the English patch (fan translation)";
 }
 
 /* The .cue of the disc installed in game/<sub>, if there is one. */

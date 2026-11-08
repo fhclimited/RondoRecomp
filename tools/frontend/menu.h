@@ -29,7 +29,7 @@ typedef struct Menu {
     int root;              /* the page Back returns to: the in-game menu or the start screen */
     int sel[8];
     char status[160];      /* one line at the bottom (e.g. "State 3 saved") */
-    char info[2][64];      /* start screen: lines under the title (the disc, the languages) */
+    char info[2][96];      /* start screen: lines under the title (the disc, the languages) */
     Uint64 opened_ms;      /* when it opened: the panel opens out */
 } Menu;
 

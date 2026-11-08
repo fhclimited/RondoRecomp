@@ -5,7 +5,7 @@
 # usage: tools/package_release.sh [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VER=${1:-0.9}
+VER=${1:-0.9.1}
 B=build
 LIC=/c/msys64/ucrt64/share/licenses
 
@@ -34,18 +34,19 @@ cp docs/PLAYER_README.txt "$OUT/README.txt"
     echo "    https://www.gnu.org/software/libiconv - source: https://packages.msys2.org"
     echo "stb_truetype (sdk/src/frontend/stb_truetype.h, draws the menus' text): public domain"
     echo "    (or MIT), Sean Barrett - https://github.com/nothings/stb"
-    echo "The menus use fonts that come with Windows (Bahnschrift, Palatino Linotype); none are"
-    echo "included."
+    echo "Cinzel, Cinzel Decorative and UnifrakturMaguntia fonts (sdk/src/frontend/ui_fonts.c, built"
+    echo "into rondo.exe for the menus): SIL Open Font License 1.1 - the Cinzel Project Authors,"
+    echo "Natanael Gama; j. 'mach' wust, Peter Wiegel. https://github.com/google/fonts"
     echo "Shinonome Gothic 12 and 16 dot bitmap fonts (sdk/src/runtime/pce/kanji_font.c, the"
     echo "Japanese text of the original disc): public domain, The Electronic Font Open Laboratory"
     echo "    http://openlab.jp/efont/shinonome/"
     echo
     echo "The license texts follow."
-    for f in "$LIC/SDL3/LICENSE.txt" "$LIC/zlib/LICENSE" "$LIC/libiconv/COPYING.LIB"; do
+    for f in "$LIC/SDL3/LICENSE.txt" "$LIC/zlib/LICENSE" "$LIC/libiconv/COPYING.LIB" tools/fonts/OFL-*.txt; do
         [ -f "$f" ] || continue
         echo
         echo "---------------------------------------------------------------------------"
-        echo "$f" | sed 's|.*/licenses/||'
+        echo "$f" | sed 's|.*/licenses/||; s|tools/fonts/||'
         echo "---------------------------------------------------------------------------"
         cat "$f"
     done

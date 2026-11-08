@@ -31,7 +31,8 @@ set(FRONTEND_SOURCES
   tools/frontend/menu.c
   tools/frontend/settings.c
   tools/frontend/video.c
-  tools/frontend/theme.c)
+  tools/frontend/theme.c
+  tools/frontend/ui_fonts.c)
 
 file(REMOVE_RECURSE "${OUT}")
 foreach(dir cpu pce recomp)

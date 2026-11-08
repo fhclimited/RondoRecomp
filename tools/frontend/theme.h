@@ -1,15 +1,17 @@
-/* The look of the frontend's own screens (the start screen, the menu, notices), after the
- * Metroid: Other M port's visor menus but in Castlevania's colours: dark glass panels with
- * cut corners, gold lines with a soft glow, crimson accents, scan lines; a cross in turning
- * rings for an emblem. Text is drawn in Windows' own fonts (Bahnschrift for the menus,
- * Palatino for titles) with stb_truetype; without them, in SDL's built-in debug font.
- * Everything draws in render-output pixels. */
+/* The look of the frontend's own screens (the start screen, the menu, notices): gothic, in
+ * Castlevania's colours, laid out after the Metroid: Other M port's menus. Panels are dark
+ * burgundy frames with a pointed-arch top, double gold borders, pinnacles and a cross finial;
+ * dividers carry diamonds and a cross; the emblem is a rose window; the start screen is a
+ * moonlit castle skyline with bats. Text is drawn with stb_truetype in fonts built into
+ * rondo.exe (ui_fonts.c, SIL OFL): Cinzel for menu text, Cinzel Decorative for capitals,
+ * UnifrakturMaguntia (blackletter) for titles; Windows' fonts, then SDL's debug font, if
+ * one cannot be read. Everything draws in render-output pixels. */
 #pragma once
 
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 
-enum { TH_FONT_UI, TH_FONT_TITLE, TH_FONT_COUNT };
+enum { TH_FONT_UI, TH_FONT_TITLE, TH_FONT_CAPS, TH_FONT_COUNT };
 
 #define TH_GOLD ((SDL_Color){230, 184, 92, 255})
 #define TH_CRIMSON ((SDL_Color){222, 44, 58, 255})
@@ -57,11 +59,27 @@ void th_chevron(SDL_Renderer *ren, float x, float y, float size, bool right, SDL
 void th_plate(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float slant, SDL_Color fill,
               SDL_Color border, float thick);
 
-/* The emblem: a cross in rings, `r` pixels to the inner ring, turning with time `t`
- * (seconds); `alpha` 0-1. */
+/* A filled disc shaded top to bottom; a cross whose arms widen towards their ends, centred
+ * on its crossing (r: its size), with an optional edge line. */
+void th_disc(SDL_Renderer *ren, float cx, float cy, float r, SDL_Color top, SDL_Color bottom);
+void th_cross(SDL_Renderer *ren, float cx, float cy, float r, SDL_Color top, SDL_Color bottom, SDL_Color edge,
+              float edge_w);
+/* A small filled arrowhead pointing right (or left), `size` pixels tall. */
+void th_arrow(SDL_Renderer *ren, float x, float y, float size, bool right, SDL_Color c);
+/* A gothic panel: x0..x1, its pointed-arch top `rise` pixels high at y0 (the apex), its
+ * bottom at y1; dark burgundy, a gold border with an inner line, pinnacles at the arch's
+ * feet, a cross on the apex. `u` is the layout unit, `alpha` 0-1. */
+void th_frame(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float rise, float u, float alpha);
+/* A divider from x0 to x1 at y: gold lines either side of diamonds and a small cross. */
+void th_divider(SDL_Renderer *ren, float x0, float x1, float y, float u, float alpha);
+/* A plaque with pointed ends (notices). */
+void th_plaque(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float u, float alpha);
+
+/* The emblem: a rose window, `r` pixels across to its rim, with a gold cross in stained
+ * glass; `t` (seconds) makes the glass glow; `alpha` 0-1. */
 void th_emblem(SDL_Renderer *ren, float cx, float cy, float r, float t, float alpha);
-/* The start screen's backdrop over the whole w x h output: night-red gradient, a faint grid,
- * scan lines, darkened edges. */
+/* The start screen's backdrop over the whole w x h output: a night sky, a blood moon, the
+ * castle's skyline with lit windows, mist, bats crossing (t: seconds). */
 void th_backdrop(SDL_Renderer *ren, int w, int h, float t);
 
 /* Layout unit: 1 at 960 x 540, scaled with the output (the smaller of its width / 16 and
