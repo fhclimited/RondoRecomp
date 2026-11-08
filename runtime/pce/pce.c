@@ -386,7 +386,7 @@ void pce_audio_render(Pce *p, int16_t *out, int frames)
     memset(out, 0, (size_t)frames * 2 * sizeof *out);
     if (!p->mute_cdda) cdda_mix(p, out, frames);
     sound_advance(&p->snd, p->master);
-    sound_take(&p->snd, out, frames);
+    sound_take_fit(&p->snd, out, frames);   /* what the frame made, as `frames`: no delay builds up */
 }
 
 void pce_run_frame(Pce *p)

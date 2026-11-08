@@ -44,7 +44,7 @@ typedef struct Sound {
     uint16_t ad_start, ad_addr;
     uint32_t ad_len, ad_left;          /* bytes */
     uint8_t ad_rate;
-    bool ad_high;                      /* next nibble is the high one */
+    bool ad_low;                       /* next nibble is the byte's low one (the high one plays first) */
     int ad_signal, ad_index;
     int ad_prev, ad_cur;               /* last two decoded samples (12-bit) */
     double ad_phase;
@@ -75,3 +75,13 @@ void sound_adpcm_stream(Sound *s, uint64_t now, int lba, uint32_t bytes, uint8_t
 void sound_adpcm_fade(Sound *s, int step);
 /* Take up to n frames of mixed PSG + ADPCM output (adds to out); returns frames taken. */
 int sound_take(Sound *s, int16_t *out, int n);
+/* Drop all but the newest `keep` frames left in the buffer. */
+void sound_trim(Sound *s, uint32_t keep);
+/* Take everything waiting (a frame's output) as exactly n frames, stretched or squeezed to
+ * fit (linear interpolation; adds to out). A frame of the emulation runs a little longer than
+ * the nominal 263 x 1365 master cycles (a line ends after the instruction that crosses it,
+ * about 0.4% over a frame), so it makes a few more frames of sound than a frame's worth of
+ * output: taken n at a time, the rest built up as delay (to the buffer's 0.37 s) and was then
+ * dropped every frame. Fitted, nothing waits (pitch 0.4% up, inaudible). More than n * 5/4
+ * waiting is a backlog (frames run with no output taken): the older part is dropped first. */
+int sound_take_fit(Sound *s, int16_t *out, int n);

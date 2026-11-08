@@ -10,7 +10,8 @@
 #define PSG_HZ (MASTER_HZ / 6.0)              /* 3.58 MHz */
 #define PSG_PER_SAMPLE (PSG_HZ / SND_RATE)
 #define PSG_GAIN 300.0f                        /* per channel, per step of the 5-bit wave */
-#define ADPCM_GAIN 6                           /* 12-bit signal -> 16-bit output */
+#define ADPCM_GAIN 8                           /* 12-bit full scale -> 16-bit full scale, at half
+                                                * the CD audio's level (as MAME's PC Engine CD mixes it) */
 
 /* ---- PSG ------------------------------------------------------------------------- */
 
@@ -103,7 +104,11 @@ static float psg_channel(PsgChannel *c, int index, double period_override)
     return (float)(sample - 16);
 }
 
-/* ---- ADPCM (OKI MSM5205 style, low nibble first) ---------------------------------- */
+/* ---- ADPCM (OKI MSM5205, each byte's high nibble first) ----------------------------
+ * The order is the hardware's (MAME's PC Engine CD plays bits 4-7, then 0-3). Played the
+ * other way round the game's clips decode as a slow random walk that keeps hitting the
+ * 12-bit limits (Death's first line in the Prologue: 92 times); this way none do, and they
+ * have speech's spectrum and pitch. */
 
 static const int16_t step_table[49] = {
     16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157,
@@ -132,9 +137,9 @@ static void adpcm_advance_byte(Sound *s)
 static int adpcm_next(Sound *s)
 {
     uint8_t b = adpcm_byte(s);
-    int n = s->ad_high ? b >> 4 : b & 15;
-    if (s->ad_high) adpcm_advance_byte(s);
-    s->ad_high = !s->ad_high;
+    int n = s->ad_low ? b & 15 : b >> 4;
+    if (s->ad_low) adpcm_advance_byte(s);
+    s->ad_low = !s->ad_low;
     int st = step_table[s->ad_index];
     int diff = st >> 3;
     if (n & 1) diff += st >> 2;
@@ -154,7 +159,7 @@ static void adpcm_restart(Sound *s)
 {
     s->ad_addr = s->ad_start;
     s->ad_left = s->ad_len;
-    s->ad_high = false;
+    s->ad_low = false;
     s->ad_signal = 0;
     s->ad_index = 0;
     s->ad_prev = s->ad_cur = 0;
@@ -190,7 +195,7 @@ void sound_adpcm_stream(Sound *s, uint64_t now, int lba, uint32_t bytes, uint8_t
     s->ad_rate = rate & 15;
     s->ad_repeat = false;
     s->ad_left = bytes;
-    s->ad_high = false;
+    s->ad_low = false;
     s->ad_signal = 0;
     s->ad_index = 0;
     s->ad_prev = s->ad_cur = 0;
@@ -272,6 +277,33 @@ void sound_advance(Sound *s, uint64_t now)
         s->ring[at * 2 + 1] = clamp16((int)(r * PSG_GAIN) + ad);
         s->count++;
     }
+}
+
+void sound_trim(Sound *s, uint32_t keep)
+{
+    if (s->count <= keep) return;
+    s->head = (s->head + (s->count - keep)) % SND_RING;
+    s->count = keep;
+}
+
+int sound_take_fit(Sound *s, int16_t *out, int n)
+{
+    if (n <= 0) return 0;
+    if (s->count > (uint32_t)(n + n / 4)) sound_trim(s, (uint32_t)n);
+    uint32_t m = s->count;
+    if (m < (uint32_t)n / 2) return sound_take(s, out, n);   /* too little to stretch: as it is */
+    for (int i = 0; i < n; i++) {
+        double pos = (double)i * m / n;
+        uint32_t j = (uint32_t)pos, j1 = j + 1 < m ? j + 1 : m - 1;
+        double f = pos - j;
+        const int16_t *a = &s->ring[((s->head + j) % SND_RING) * 2];
+        const int16_t *b = &s->ring[((s->head + j1) % SND_RING) * 2];
+        out[i * 2] = clamp16(out[i * 2] + (int)(a[0] + (b[0] - a[0]) * f));
+        out[i * 2 + 1] = clamp16(out[i * 2 + 1] + (int)(a[1] + (b[1] - a[1]) * f));
+    }
+    s->head = (s->head + m) % SND_RING;
+    s->count = 0;
+    return n;
 }
 
 int sound_take(Sound *s, int16_t *out, int n)

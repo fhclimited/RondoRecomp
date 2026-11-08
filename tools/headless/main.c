@@ -158,6 +158,8 @@ int main(int argc, char **argv)
     struct { long frame; char path[256]; } mem_at[4];   /* --dump-mem: all 256 banks + MPRs */
     int n_mem = 0;
     const char *load_state = NULL;
+    unsigned long long state_disc = 0;   /* --state-disc HEX: the disc id a state was saved with (rondo.exe's) */
+    const char *bram_file = NULL;        /* --bram FILE: backup RAM to start with (a player's bram.bin), not written */
     GameCheats cheats = {0};
     GameWatch gw;
     bool skip_cine = false;
@@ -215,6 +217,8 @@ int main(int argc, char **argv)
             snprintf(save_at[n_save_at++].path, sizeof save_at[0].path, "%s", colon ? colon + 1 : "work/s.state");
         }
         else if (!strcmp(argv[i], "--load-state") && i + 1 < argc) load_state = argv[++i];
+        else if (!strcmp(argv[i], "--state-disc") && i + 1 < argc) state_disc = strtoull(argv[++i], NULL, 16);
+        else if (!strcmp(argv[i], "--bram") && i + 1 < argc) bram_file = argv[++i];
         else if (!strcmp(argv[i], "--cheats") && i + 1 < argc) {
             const char *c = argv[++i];
             cheats.health = strstr(c, "health") != NULL;
@@ -306,6 +310,12 @@ int main(int argc, char **argv)
         fprintf(stderr, "error: %s\n", err);
         return 1;
     }
+    if (bram_file) {
+        FILE *bf = fopen(bram_file, "rb");
+        size_t got = bf ? fread(pce.bram, 1, 0x800, bf) : 0;
+        if (bf) fclose(bf);
+        printf("backup RAM: %zu bytes from %s\n", got, bram_file);
+    }
     pce.log_bios = log_bios;
     pce.log_bios_all = log_all;
     pce.mute_cdda = mute_cd;
@@ -314,7 +324,7 @@ int main(int argc, char **argv)
     if (seeds_path) recomp_load_misses(seeds_path);
     if (prof || n_watch || trace_left || n_ww || scroll_log || vw_count) pce.on_step = step_hook;
     if (load_state) {
-        if (!pce_state_load(&pce, load_state, 0, err, sizeof err)) { fprintf(stderr, "load state: %s\n", err); return 1; }
+        if (!pce_state_load(&pce, load_state, state_disc, err, sizeof err)) { fprintf(stderr, "load state: %s\n", err); return 1; }
         start_frame = (long)pce.frame;
         printf("state loaded: frame %ld\n", start_frame);
     }
@@ -331,6 +341,7 @@ int main(int argc, char **argv)
     double audio_frac = 0;
     if (wav) { uint8_t hdr[44] = {0}; fwrite(hdr, 1, 44, wav); }
 
+    uint64_t start_master = pce.master;
     for (long f = start_frame; f < start_frame + frames; f++) {
         if (wav) {
             static int16_t s[2048 * 2];
@@ -462,6 +473,10 @@ int main(int argc, char **argv)
         if (misses_path && recomp_write_misses(misses_path)) printf("Misses written to %s\n", misses_path);
     }
     if (skip_cine) printf("Cinematic frames run with input ignored: %ld\n", skipped);
+    if (pce.frame > (uint64_t)start_frame)
+        printf("Master clock: %.1f cycles a frame over this run (nominal %d)\n",
+               (double)(pce.master - start_master) / (double)(pce.frame - (uint64_t)start_frame),
+               PCE_MASTER_PER_LINE * PCE_LINES_PER_FRAME);
     printf("Sound: %llu PSG register writes; PSG audible for %.1f s, ADPCM for %.1f s\n",
            (unsigned long long)pce.snd.psg_writes, (double)pce.snd.psg_samples / SND_RATE,
            (double)pce.snd.adpcm_samples / SND_RATE);

@@ -81,11 +81,22 @@ Japanese disc draws its attract-mode story with it (12x12), the English translat
   LFO: channel 1's waveform, clocked `lfo_freq` times slower, modulates channel 0's period
   (x1, x16, x256) and is not heard itself.
 - **ADPCM** (voices): OKI MSM5205-style 4-bit ADPCM from the 64 KiB ADPCM RAM at
-  32 kHz / (16 - rate), **low nibble first** (checked on the game's own clips: the other order
-  decodes to noise), linearly interpolated to 44.1 kHz. AD_STAT reports busy while a clip
+  32 kHz / (16 - rate), **each byte's high nibble first**, as the hardware plays them (MAME's
+  PC Engine CD does the same). Low nibble first (before 0.11.1) turned the voices into a slow
+  random walk that kept hitting the 12-bit limits: Death's first line clipped 92 times and had
+  almost all its energy below 80 Hz; high first it never clips and has speech's spectrum and
+  pitch. Linearly interpolated to 44.1 kHz; mixed at 12-bit full scale = 16-bit full scale,
+  half the CD audio's level (MAME's 0.5 against 1.0). AD_STAT reports busy while a clip
   plays; the game waits on that, so it affects game timing.
 - PSG writes and ADPCM starts are time-stamped with the master clock: the sound module renders
   up to that moment before applying them. CD audio is mixed in at output (`pce_audio_render`).
+- A frame of the emulation runs about 0.4% over the nominal 263 x 1365 master cycles (a line
+  ends after the instruction that crosses it; `rondo_headless` prints the average), so it
+  makes about 740 samples of PSG + ADPCM where the output takes 737. Before 0.11.1 the rest
+  waited in the buffer: sound effects and voices fell behind the picture and the CD music
+  until, after about 90 s, they were 0.37 s late and samples were dropped every frame.
+  `sound_take_fit` now fits each frame's sound to the frame's output (pitch 0.4% up), so
+  nothing waits; a backlog (frames run without output, e.g. a test) is dropped.
 - `rondo_headless --wav FILE [--mute-cd]` records the output; the summary reports PSG writes and
   how long PSG and ADPCM were audible.
 

@@ -700,7 +700,10 @@ int main(int argc, char **argv)
                        SDL_GetTicksNS() - t0 < 12000000) {
                     pce.pad = !skip_intro && (pce.frame & 15) < 4 ? PAD_I : 0;
                     run_frame();
-                    pce_audio_render(&pce, samples, 735);
+                    audio_frac += AUDIO_RATE / FRAME_RATE;   /* a frame's worth, not heard */
+                    int skip_n = (int)audio_frac;
+                    audio_frac -= skip_n;
+                    pce_audio_render(&pce, samples, skip_n);
                     game_apply_cheats(&pce, &cheats, &gw);
                     flush_bram(&ss);
                 }
@@ -714,8 +717,10 @@ int main(int argc, char **argv)
                     if (have_rewind) rewind_record(&rw, &pce, 0);   /* one step back over the whole scene */
                     if (features_dir) {
                         t_cine_end = (long)pce.frame;
-                        TLOG("features: %s frames %ld-%ld skipped in %.2f s\n", skip_intro ? "intro" : "cinematic",
-                             t_cine_start, t_cine_end, (double)(SDL_GetTicksNS() - t_cine_ns) / 1e9);
+                        TLOG("features: %s frames %ld-%ld skipped in %.2f s (sound left waiting: %u samples%s)\n",
+                             skip_intro ? "intro" : "cinematic", t_cine_start, t_cine_end,
+                             (double)(SDL_GetTicksNS() - t_cine_ns) / 1e9, pce.snd.count,
+                             pce.snd.count > 64 ? ", LAGGING" : "");
                     }
                 }
             } else if (rewinding) {
