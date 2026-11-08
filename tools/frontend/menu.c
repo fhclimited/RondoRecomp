@@ -11,12 +11,12 @@
 
 enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_START, PAGE_COUNT };
 
-typedef enum { IT_ACTION, IT_PAGE, IT_CHOICE, IT_TOGGLE, IT_TEXT, IT_BACK } ItemKind;
+typedef enum { IT_ACTION, IT_PAGE, IT_CHOICE, IT_TOGGLE, IT_TEXT, IT_BACK, IT_BIND } ItemKind;
 
 typedef struct Item {
     ItemKind kind;
     const char *label;
-    int arg;                   /* IT_ACTION: MenuResult; IT_PAGE: page */
+    int arg;                   /* IT_ACTION: MenuResult; IT_PAGE: page; IT_BIND: action (binds.h) */
     size_t field;              /* IT_CHOICE / IT_TOGGLE: offsetof(Settings, ...) */
     const char *const *choices;
     int n_choices;
@@ -42,6 +42,7 @@ static const char *const VOLUMES[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8
 #define CHOICE(lbl, fld, arr, base, chg) {IT_CHOICE, lbl, 0, F_INT(fld), arr, (int)(sizeof arr / sizeof arr[0]), base, chg}
 #define TOGGLE(lbl, fld, chg) {IT_TOGGLE, lbl, 0, F_BOOL(fld), OFF_ON, 2, 0, chg}
 #define TOGGLE_NAMED(lbl, fld, arr, chg) {IT_TOGGLE, lbl, 0, F_BOOL(fld), arr, 2, 0, chg}
+#define BIND(lbl, act) {IT_BIND, lbl, act, 0, NULL, 0, 0, 0}
 
 static const Item MAIN_ITEMS[] = {
     {IT_ACTION, "Resume", MENU_CLOSE, 0, NULL, 0, 0, 0},
@@ -80,7 +81,7 @@ static const Item VIDEO_ITEMS[] = {
 };
 static const Item GAMEPLAY_ITEMS[] = {
     CHOICE("Skip cinematics", skip, SKIPS, 0, MENU_SETTINGS_CHANGED),
-    TOGGLE("Rewind (hold LT / R)", rewind, MENU_SETTINGS_CHANGED),
+    TOGGLE("Rewind", rewind, MENU_SETTINGS_CHANGED),
     CHOICE("Volume", volume, VOLUMES, 0, MENU_SETTINGS_CHANGED),
     TOGGLE("Start screen at launch", start_screen, MENU_SETTINGS_CHANGED),
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
@@ -96,17 +97,19 @@ static const Item CHEAT_ITEMS[] = {
 static const Item CONTROL_ITEMS[] = {
     {IT_TEXT, "\tController\tKeyboard", 0, 0, NULL, 0, 0, 0},
     {IT_TEXT, "Move\tD-pad / stick\tArrows", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Jump\tA\tX", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Attack\tX\tZ", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Sub-weapon\tB\tC", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Item Crash\tY\tV", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Backflip\tRB\tA", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Run (hold)\tLB\tS", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Pause\tSTART\tEnter", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Menu\tBACK\tF1 / Esc", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Rewind (hold)\tLT\tR", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Save / load state\t\tF5 / F8", 0, 0, NULL, 0, 0, 0},
-    {IT_TEXT, "Fullscreen\t\tF11", 0, 0, NULL, 0, 0, 0},
+    BIND("Jump", ACT_JUMP),
+    BIND("Attack", ACT_ATTACK),
+    BIND("Sub-weapon", ACT_SUB),
+    BIND("Item Crash", ACT_CRASH),
+    BIND("Backflip", ACT_FLIP),
+    BIND("Run (hold)", ACT_RUN),
+    BIND("Pause", ACT_PAUSE),
+    BIND("Menu", ACT_MENU),
+    BIND("Rewind (hold)", ACT_REWIND),
+    BIND("Save state", ACT_SAVE),
+    BIND("Load state", ACT_LOAD),
+    {IT_TEXT, "Slot / fullscreen\t\tF6 F7 / F11", 0, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Reset controls", MENU_RESET_CONTROLS, 0, NULL, 0, 0, 0},
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 
@@ -125,16 +128,16 @@ static const struct { const char *title; const Item *items; int n; int parent; }
 static const struct { const char *label, *help; } HELP[] = {
     {"Play", "Start the game: on from power-on to its title screen."},
     {"Language", "The English patch (fan translation) or the Japanese original: each is its own disc."},
-    {"Load state", "Continue from the save state in the slot below (F8 in the game)."},
+    {"Load state", "Continue from the save state in the slot below."},
     {"State slot", "Which of the nine save-state slots to use (F6 / F7 in the game)."},
     {"Video", "Fullscreen, the picture's shape, size and filter; experimental widescreen."},
     {"Gameplay", "Story scenes, rewind, volume and the start screen."},
     {"Cheats", "Infinite health, hearts and lives; Maria."},
-    {"Controls", "The buttons and keys."},
+    {"Controls", "The buttons and keys: change any of them."},
     {"Setup (add a disc, rebuild)", "Open Setup to add the other language's disc or rebuild; this closes."},
     {"Quit", "Close Rondo Recomp."},
     {"Resume", "Back to the game."},
-    {"Save state", "Keep this moment in the slot below (F5 in the game)."},
+    {"Save state", "Keep this moment in the slot below."},
     {"Reset game", "Restart the game from power-on."},
     {"Start screen", "Leave the game for the start screen."},
     {"Fullscreen", "Use the whole screen at its own resolution (F11)."},
@@ -143,8 +146,9 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Size", "As big as the screen allows, or whole multiples only."},
     {"Filter", "Sharp: crisp, even pixels. Nearest: raw. Smooth: softened."},
     {"Beside the picture", "What fills the screen beside a narrower picture."},
-    {"Skip cinematics", "Story scenes and the intro: START skips them, or they are skipped."},
-    {"Rewind (hold LT / R)", "Hold LT or R to play the game backwards."},
+    {"Skip cinematics", "Story scenes and the intro: Pause (START) skips them, or they are skipped."},
+    {"Rewind", "Hold the Rewind control (LT / R unless changed) to play the game backwards."},
+    {"Reset controls", "Every button and key back to its default."},
     {"Volume", "Sound volume."},
     {"Start screen at launch", "Off: rondo.exe goes straight into the game."},
     {"Infinite health", "Health never goes down."},
@@ -232,7 +236,18 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
         return MENU_NOTHING;
     case NAV_OK:
         switch (it->kind) {
-        case IT_ACTION: return (MenuResult)it->arg;
+        case IT_ACTION:
+            if (it->arg == MENU_RESET_CONTROLS) {
+                bind_defaults(s->bind_pad, s->bind_key);
+                snprintf(m->status, sizeof m->status, "Every control is back to its default.");
+                return MENU_SETTINGS_CHANGED;
+            }
+            return (MenuResult)it->arg;
+        case IT_BIND:
+            m->capturing = it->arg + 1;
+            m->capture_until = SDL_GetTicks() + 5000;
+            m->status[0] = 0;
+            return MENU_NOTHING;
         case IT_PAGE: m->page = it->arg; m->sel[m->page] = first_selectable(m->page); return MENU_NOTHING;
         case IT_BACK: m->page = parent_of(m, m->page); return MENU_NOTHING;
         case IT_CHOICE:
@@ -253,8 +268,51 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
     }
 }
 
+bool menu_capturing(const Menu *m) { return m->open && m->capturing > 0; }
+
+void menu_update(Menu *m)
+{
+    if (m->capturing && SDL_GetTicks() >= m->capture_until) {
+        m->capturing = 0;
+        snprintf(m->status, sizeof m->status, "Nothing pressed: left as it was.");
+    }
+}
+
+MenuResult menu_capture(Menu *m, Settings *s, const Input *in, const SDL_Event *ev)
+{
+    if (!m->capturing) return MENU_NOTHING;
+    int act = m->capturing - 1;
+    if (ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+        (ev->type == SDL_EVENT_KEY_DOWN && ev->key.scancode == SDL_SCANCODE_ESCAPE)) {
+        m->capturing = 0;
+        snprintf(m->status, sizeof m->status, "%s: left as it was.", bind_action(act)->name);
+        return MENU_NOTHING;
+    }
+    bool is_pad;
+    int v;
+    if (!input_control_of(in, ev, &is_pad, &v)) return MENU_NOTHING;
+    int before_pad[ACT_COUNT], before_key[ACT_COUNT];
+    memcpy(before_pad, s->bind_pad, sizeof before_pad);
+    memcpy(before_key, s->bind_key, sizeof before_key);
+    const char *msg = bind_assign(s->bind_pad, s->bind_key, act, is_pad, v);
+    bool reserved = is_pad ? bind_pad_reserved(v) : bind_key_reserved(v);
+    snprintf(m->status, sizeof m->status, "%s", msg ? msg : "");
+    if (reserved) {                                 /* keep waiting for another */
+        m->capture_until = SDL_GetTicks() + 5000;
+        return MENU_NOTHING;
+    }
+    m->capturing = 0;
+    return memcmp(before_pad, s->bind_pad, sizeof before_pad) || memcmp(before_key, s->bind_key, sizeof before_key)
+               ? MENU_SETTINGS_CHANGED
+               : MENU_NOTHING;
+}
+
 static const char *item_help(int page, const Item *it)
 {
+    if (it->kind == IT_BIND)
+        return bind_action(it->arg)->clearable
+                   ? "A / Enter, then the button or key for it. One in use swaps over; its own again clears it."
+                   : "A / Enter, then the button or key for it. One in use swaps over.";
     if (page == PAGE_CONTROLS && it->kind == IT_BACK)
         return "Sub-weapon is also Up + Attack, Backflip is Jump twice: the original inputs work too.";
     for (size_t i = 0; i < sizeof HELP / sizeof HELP[0]; i++)
@@ -406,6 +464,19 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
             draw_table_row(ren, F, y, it->label, F->text_px * 0.95f, a);
             continue;
         }
+        if (it->kind == IT_BIND) {
+            char row[160];
+            if (m->capturing == it->arg + 1) {
+                Uint64 now = SDL_GetTicks();
+                int left = m->capture_until > now ? (int)((m->capture_until - now + 999) / 1000) : 0;
+                snprintf(row, sizeof row, "%s\tPress a button or key...  %d", it->label, left);
+            } else {
+                snprintf(row, sizeof row, "%s\t%s\t%s", it->label, bind_pad_name(s->bind_pad[it->arg]),
+                         bind_key_name(s->bind_key[it->arg]));
+            }
+            draw_table_row(ren, F, y, row, F->text_px * 0.95f, a);
+            continue;
+        }
         char label[96];
         snprintf(label, sizeof label, "%s", it->label);
         if (it->kind == IT_ACTION && (it->arg == MENU_SAVE_STATE || it->arg == MENU_LOAD_STATE))
@@ -439,7 +510,9 @@ static void draw_footer(SDL_Renderer *ren, const Frame *F, const Menu *m, float 
     const char *help = m->status[0] ? m->status : selectable(it) ? item_help(m->page, it) : "";
     th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 13.5f * u, help, w, 0), mx, F->foot_y + 18 * u,
             th_fade(m->status[0] ? TH_ACTION : TH_TEXT, a), help, 0.5f, 0.5f, 0, TH_NONE);
-    const char *hint = m->page == PAGE_START
+    const char *hint = m->capturing
+                           ? "PRESS A BUTTON OR KEY     ITS OWN AGAIN  CLEARS     ESC OR WAIT  LEAVE IT"
+                       : m->page == PAGE_START
                            ? "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     START  PLAY"
                        : m->page == PAGE_MAIN
                            ? "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     B / ESC  RESUME"

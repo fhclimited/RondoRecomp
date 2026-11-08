@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "binds.h"
+
 enum { ASPECT_4_3, ASPECT_SQUARE, ASPECT_STRETCH, ASPECT_COUNT };
 enum { FILTER_SHARP, FILTER_NEAREST, FILTER_SMOOTH, FILTER_COUNT };
 enum { SIDES_BLUR, SIDES_BLACK, SIDES_COUNT };
@@ -32,6 +34,9 @@ typedef struct Settings {
     int language;          /* LANG_* */
     char disc_ja[1024];    /* the Japanese disc image (.cue) the player chose, if not installed by Setup */
     char disc_en[1024];    /* the same for the English (translated) disc */
+    /* controls (binds.h): a controller button and a key for each action */
+    int bind_pad[ACT_COUNT];
+    int bind_key[ACT_COUNT];
 } Settings;
 
 void settings_default(Settings *s);

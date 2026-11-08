@@ -413,6 +413,7 @@ int main(int argc, char **argv)
 
     Input in;
     input_init(&in);
+    input_use_binds(&in, set.bind_pad, set.bind_key);   /* the Controls page changes them in place */
     Menu menu = {0};
     /* --autotest-start: the start screen for 600 frames, a mouse click on Play (a real event
      * through the queue), 300 frames later the title screen (Play skips the logo and intro);
@@ -501,7 +502,9 @@ int main(int argc, char **argv)
             input_device_event(&in, &ev);
             if (menu.open) {
                 MenuResult r = MENU_NOTHING;
-                if (ev.type == SDL_EVENT_MOUSE_MOTION || ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                if (menu_capturing(&menu)) {
+                    r = menu_capture(&menu, &set, &in, &ev);   /* the next button or key is the control */
+                } else if (ev.type == SDL_EVENT_MOUSE_MOTION || ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                     SDL_Event e = ev;
                     SDL_ConvertEventToRenderCoordinates(ren, &e);
                     bool motion = ev.type == SDL_EVENT_MOUSE_MOTION;
@@ -511,6 +514,7 @@ int main(int argc, char **argv)
                     else if (e.button.button == SDL_BUTTON_RIGHT) r = menu_nav(&menu, &set, NAV_BACK);
                 } else {
                     Nav nav = input_nav_event(&ev);
+                    if (nav == NAV_NONE && input_pressed(&in, &ev, ACT_MENU)) nav = NAV_MENU;   /* rebound */
                     if (nav == NAV_NONE) continue;
                     r = menu_nav(&menu, &set, nav);
                 }
@@ -596,7 +600,7 @@ int main(int argc, char **argv)
             bool open_menu = false;
             if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
                 SDL_Scancode sc = ev.key.scancode;
-                if (sc == SDL_SCANCODE_F1 || sc == SDL_SCANCODE_ESCAPE) open_menu = true;
+                if (sc == SDL_SCANCODE_ESCAPE) open_menu = true;      /* Esc always; the Menu control below */
                 else if (sc == SDL_SCANCODE_F11) {
                     set.fullscreen = !set.fullscreen;
                     SDL_SetWindowFullscreen(win, set.fullscreen);
@@ -605,10 +609,14 @@ int main(int argc, char **argv)
                     set.slot = (set.slot + (sc == SDL_SCANCODE_F7 ? 1 : 8) - 1) % 9 + 1;
                     show_osd("State slot %d", set.slot);
                     if (!test_mode) settings_save(&set, settings_path);
-                } else if (sc == SDL_SCANCODE_F5 || sc == SDL_SCANCODE_F8) {
+                }
+            }
+            {   /* save and load state: their own controls (F5 / F8 unless changed) */
+                bool save = input_pressed(&in, &ev, ACT_SAVE), load = input_pressed(&in, &ev, ACT_LOAD);
+                if (save || load) {
                     char path[1200];
                     state_path(path, sizeof path, &ss, set.slot);
-                    if (sc == SDL_SCANCODE_F5) {
+                    if (save) {
                         if (pce_state_save(&pce, path, ss.disc_id, err, sizeof err)) show_osd("State %d saved", set.slot);
                         else show_osd("Save failed: %s", err);
                     } else if (pce_state_load(&pce, path, ss.disc_id, err, sizeof err)) {
@@ -622,15 +630,16 @@ int main(int argc, char **argv)
                     }
                 }
             }
-            if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && ev.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) open_menu = true;
-            if (input_is_start(&ev)) start_pressed = true;
+            if (input_pressed(&in, &ev, ACT_MENU)) open_menu = true;
+            if (input_pressed(&in, &ev, ACT_PAUSE)) start_pressed = true;
             if (open_menu && !test_mode) {
                 menu_open(&menu);
                 input_cancel_macros(&in);
             }
         }
         if (menu.open) {
-            Nav nav = test_mode ? NAV_NONE : input_nav_stick(&in);
+            menu_update(&menu);
+            Nav nav = test_mode || menu_capturing(&menu) ? NAV_NONE : input_nav_stick(&in);
             if (nav != NAV_NONE) {
                 MenuResult r = menu_nav(&menu, &set, nav);    /* the stick only steps and changes values */
                 if (r == MENU_LANGUAGE) {
@@ -645,6 +654,9 @@ int main(int argc, char **argv)
         }
 
         prompt.pad = input_pad_last(&in);
+        prompt.line = prompt.pad ? (set.bind_pad[ACT_PAUSE] == SDL_GAMEPAD_BUTTON_START ? "PUSH  START  BUTTON!"
+                                                                                       : "PUSH  PAUSE  BUTTON!")
+                                 : (set.bind_key[ACT_PAUSE] == SDL_SCANCODE_RETURN ? "PUSH  ENTER  KEY!" : "PUSH  PAUSE  KEY!");
         GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives, set.maria_unlocked, set.play_maria};
         {   /* widescreen fills the window's shape */
             int ww, wh;
@@ -875,6 +887,24 @@ int main(int argc, char **argv)
                      after == MENU_PLAY ? "returns to it" : "DOES NOT RETURN");
             }
             char merr[200];
+            int bbad = bind_check(merr, sizeof merr);
+            TLOG("features: controls: %s%s\n", bbad ? "PROBLEM: " : "assigning, swapping, clearing and names ok",
+                 bbad ? merr : "");
+            {   /* the Controls page with Save state waiting for its button */
+                Menu cm = {0};
+                menu_open(&cm);
+                cm.opened_ms = 0;
+                for (int d = 0; d < 7; d++) menu_nav(&cm, &set, NAV_DOWN);
+                menu_nav(&cm, &set, NAV_OK);
+                for (int d = 0; d < 9; d++) menu_nav(&cm, &set, NAV_DOWN);
+                menu_nav(&cm, &set, NAV_OK);
+                video_draw(&video, &set);
+                menu_draw(&cm, &set, ren);
+                char cpath[1200];
+                snprintf(cpath, sizeof cpath, "%s/menu_controls_waiting.bmp", features_dir);
+                screenshot(ren, cpath);
+                TLOG("features: controls page: Save state %s\n", menu_capturing(&cm) ? "waits for a button or key" : "DOES NOT WAIT");
+            }
             int mbad = menu_check(&set, ren, merr, sizeof merr);
             TLOG("features: menu check: %s%s\n", mbad ? "PROBLEM at " : "every value of every option ok",
                  mbad ? merr : "");
@@ -908,8 +938,12 @@ int main(int argc, char **argv)
         } else if (SDL_GetTicks() < osd_until) {
             draw_banner(ren, osd_text, false);
         }
-        if (!menu.open && !skipping && set.skip == SKIP_START && game_in_skippable(&pce))
-            draw_banner(ren, "START: skip", true);
+        if (!menu.open && !skipping && set.skip == SKIP_START && game_in_skippable(&pce)) {
+            char skip_line[64];
+            snprintf(skip_line, sizeof skip_line, "%s: skip",
+                     input_pad_last(&in) ? bind_pad_name(set.bind_pad[ACT_PAUSE]) : bind_key_name(set.bind_key[ACT_PAUSE]));
+            draw_banner(ren, skip_line, true);
+        }
         if (menu.open) menu_draw(&menu, &set, ren);
         SDL_RenderPresent(ren);
 

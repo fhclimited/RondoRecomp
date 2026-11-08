@@ -1,6 +1,6 @@
 /* The title screen's "PUSH RUN BUTTON!" (RUN is the PC Engine's start button) shown as the
  * button to press on this PC: "PUSH START BUTTON!" with a controller, "PUSH ENTER KEY!" on
- * the keyboard.
+ * the keyboard ("PUSH PAUSE BUTTON!" / "KEY!" when the Pause control was changed).
  *
  * The game draws the line as six sprites (palette 7) over the title. Before a frame, if they
  * are in the sprite table as on the title screen, they are hidden for that frame
@@ -18,6 +18,8 @@
 
 typedef struct TitlePrompt {
     bool pad;                  /* set by the caller: a controller is the device in use */
+    const char *line;          /* set by the caller: the new line (letters of the game's line and
+                                * A E K Y, at most 22); NULL: by `pad`, START or ENTER */
     bool hidden;               /* the line's sprites are hidden this frame: draw after it */
     int palette;               /* sprite palette of the line */
     uint8_t cells[18][16][8];  /* the original line, 8 x 16 colour indices per character */

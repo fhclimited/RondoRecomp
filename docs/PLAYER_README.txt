@@ -24,8 +24,10 @@ next to the first (game\en and game\ja) instead of replacing it.
 
 Controls
 --------
+The defaults (change them on the menu's Controls page, see below):
+
               Controller (Xbox)     Keyboard
-Move          d-pad / left stick    arrow keys
+Move          d-pad / left stick    arrow keys      (fixed)
 Jump          A                     X
 Attack        X                     Z
 Sub-weapon    B                     C
@@ -33,12 +35,20 @@ Item Crash    Y                     V
 Backflip      RB                    A
 Run           hold LB               hold S
 Pause         Start                 Enter
-Menu          Back / View           F1 or Esc
+Menu          Back / View           F1              (Esc always opens it too)
 Rewind        hold LT               hold R
-Save state                          F5
-Load state                          F8
-State slot                          F6 / F7 (slots 1-9)
-Fullscreen                          F11
+Save state    -                     F5
+Load state    -                     F8
+State slot                          F6 / F7 (slots 1-9, fixed)
+Fullscreen                          F11 (fixed)
+
+Changing a control: on the Controls page choose its row (A / Enter or a click), then press
+the controller button (the triggers count) or the key for it. If another action had it, the
+two swap. Pressing an action's own button or key again leaves it with none, where the game
+can do without it (Sub-weapon, Backflip, Run, Rewind, Save state, Load state). Esc, a click
+or 5 seconds without a press leaves it as it was. Save state and load state have no
+controller button until you give them one. "Reset controls" puts every control back. The
+menus themselves always use the d-pad / stick / arrows, A / Enter and B / Esc.
 
 Sub-weapon presses Up + Attack for you, Item Crash is the original SELECT button, and
 Backflip presses Jump twice quickly (as Maria it gives her double jump). The original
@@ -46,7 +56,8 @@ inputs (Up + Attack, Jump twice) work as well.
 
 The PC Engine's start button was called RUN. The game's title screen says PUSH START
 BUTTON! when you are playing with a controller and PUSH ENTER KEY! on the keyboard (in
-place of the original PUSH RUN BUTTON!), going by what you pressed last.
+place of the original PUSH RUN BUTTON!), going by what you pressed last; PUSH PAUSE
+BUTTON! / KEY! if you gave Pause another control.
 
 Run is Richter's run from Symphony of the Night: hold LB while walking to go about 1.8
 times as fast (his run there is 2.3 pixels a frame against a 1.25 walk; Rondo's walk is the

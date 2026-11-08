@@ -146,6 +146,17 @@ Macros: the game ignores presses shorter than 3 frames, so each macro step lasts
 the backflip is the second I press while still rising (2-8 frames after the first press
 ends works, 14 is too late; measured with `rondo_headless --press`).
 
+Controls (`binds.c`): the actions the player can rebind (Jump, Attack, Sub-weapon, Item Crash,
+Backflip, Run, Pause, Menu, Rewind, Save state, Load state), each with a controller button
+(SDL gamepad button, or the triggers as `BIND_LT` / `BIND_RT`) and a key (scancode), kept in
+`Settings.bind_pad` / `bind_key` and settings.ini (`bind_pad_jump = 0` ...). `bind_assign`
+swaps with the action that had the control, clears an action's own control where the game
+can do without it, and refuses moving controls, Esc, F6 / F7 and F11. `input.c` reads every
+action through them (`input_held`, `input_pressed`; a trigger is pressed past half way and
+let go below a quarter); moving and the menus' own navigation stay fixed. On the Controls page
+a row waits for the next button, trigger or key (`menu_capture`; Esc, a click or 5 s leaves
+it). The features test checks the rules (`bind_check`) and photographs a row waiting.
+
 Modules: `input.c` (mapping, macros, menu navigation), `menu.c` (pages, persisted to
 `settings.ini` by `settings.c`), `video.c` (placement and filtering), `game.c` (what the
 frontend knows about the game: main state, cheats, run), `wide.c` (widescreen); the last two

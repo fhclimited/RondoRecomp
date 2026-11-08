@@ -118,7 +118,7 @@ void prompt_after_frame(TitlePrompt *t, Pce *p)
 {
     vdc_set_sprite_hide(0);
     if (!t->hidden) return;
-    const char *s = new_line(t->pad);
+    const char *s = t->line ? t->line : new_line(t->pad);
     int n = (int)strlen(s);
     for (int i = 0; i < n; i++) draw_char(t, p, s[i], LINE_X + i * 8);
     t->frames++;

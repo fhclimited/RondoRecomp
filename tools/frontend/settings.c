@@ -18,6 +18,7 @@ void settings_default(Settings *s)
     s->slot = 1;
     s->start_screen = true;
     s->language = LANG_EN;
+    bind_defaults(s->bind_pad, s->bind_key);
 }
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -59,6 +60,14 @@ void settings_load(Settings *s, const char *path)
         else if (!strcmp(key, "disc_ja")) snprintf(s->disc_ja, sizeof s->disc_ja, "%s", val);
         else if (!strcmp(key, "start_screen")) s->start_screen = n != 0;
         else if (!strcmp(key, "disc_en")) snprintf(s->disc_en, sizeof s->disc_en, "%s", val);
+        else if (!strncmp(key, "bind_pad_", 9) || !strncmp(key, "bind_key_", 9)) {
+            bool pad = key[5] == 'p';
+            for (int a = 0; a < ACT_COUNT; a++)
+                if (!strcmp(key + 9, bind_action(a)->key)) {
+                    if (pad) s->bind_pad[a] = (n >= 0 && n < 64) || n == BIND_LT || n == BIND_RT ? n : BIND_NONE;
+                    else s->bind_key[a] = n > 0 && n < 512 ? n : 0;
+                }
+        }
     }
     fclose(f);
 }
@@ -79,5 +88,10 @@ bool settings_save(const Settings *s, const char *path)
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
             s->maria_unlocked, s->play_maria,
             s->language, s->disc_ja, s->disc_en);
+    fprintf(f, "# controls: controller buttons (SDL gamepad button numbers; 100 LT, 101 RT, -1 none) and keys\n"
+               "# (SDL scancodes; 0 none), changed from the Controls page\n");
+    for (int a = 0; a < ACT_COUNT; a++)
+        fprintf(f, "bind_pad_%s = %d\nbind_key_%s = %d\n", bind_action(a)->key, s->bind_pad[a], bind_action(a)->key,
+                s->bind_key[a]);
     return fclose(f) == 0;
 }
