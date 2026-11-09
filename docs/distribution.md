@@ -66,6 +66,9 @@ Release folder (412 MB unpacked, 103 MB zipped; Zig is most of it):
 | `zig/` | C compiler used by Setup |
 | `README.txt`, `THIRD_PARTY.txt` | player instructions, third-party licenses |
 
+`tools/package_release.sh` also writes the update package (the same without `zig/`), see
+Updates below.
+
 What Setup does (about 40 s; the first build also prepares Zig's C library):
 
 1. import the zip (CUE + tracks, subfolders allowed, CRC-checked, Zip64 aware)
@@ -122,10 +125,64 @@ Linux (in WSL):
 - Setup from a zip and from unzipped folders (both discs)
 - `--test-achievements` through the system's libcurl
 - `--autotest`, `--autotest-start` and `--autotest-features`
+  (`tools/updtest/linux_regression.sh`, on the install `tools/updtest/linux.sh` makes)
 
 RetroAchievements: the SDK carries rcheevos (`sdk/src/rcheevos`). `sdk/sources.txt` lists its
 sources, plus `-I` (relative to the SDK) and `-D` lines, which Setup passes to the compiler.
 On Windows the game also links `winhttp`.
+
+## Updates
+
+From 1.1, an installation updates itself from the GitHub releases
+(`tools/frontend/update.h`, `tools/setup/install.c`):
+
+1. **Check.** The game asks GitHub's API for the latest release when it starts
+   (`check_updates` in settings.ini, on by default), on a thread of its own (`http.c`).
+   Setup's window asks too. A release counts when its tag (`v1.1`) is newer than
+   `RONDO_VERSION` and it has a package for this system. The start screen then shows a
+   notice, and the Updates page shows the first points of the release notes' "New in"
+   section.
+2. **Download.** "Download and install" starts `rondo_setup --update` with its output
+   piped back to the game, which shows each step and a progress bar. On Windows it runs
+   without a console window (`tools/frontend/child.c`), and so does the compiler under it.
+   Setup asks GitHub again and downloads the package into `update/`. Its size and SHA-256
+   are checked against the asset's `digest` in GitHub's answer.
+3. **Unpack** into `update/new/`: zip on Windows; tar.gz on Linux, with the file modes
+   kept. Paths that would land outside it are refused.
+4. **Install.** Each top-level file and folder of the package is renamed into place. What
+   was there is first renamed into `update/old/`. A rename works even for a program or DLL
+   that is running, like the game and Setup itself. If anything fails, everything is put
+   back.
+5. **Rebuild.** The new `rondo_setup --rebuild` builds the game from the new SDK. If that
+   fails, the old files are put back.
+   - Setup always links the game into `build/` first, then swaps it in the same way, so a
+     rebuild works while the game is running and a failed one leaves the old game.
+6. **Restart.**
+   - The game restarts as the new version: `execv` on Linux, keeping the same process, so
+     Steam keeps track of it; a new process on Windows.
+   - The new game removes what is left of `update/` (the old files that were in use).
+
+Each release has, for each system, the full package and an update package without `zig/`:
+`RondoRecomp-<v>-windows-x64-update-zig<zig>.zip` (about 7 MB against 104 MB) and
+`RondoRecomp-<v>-linux-x86_64-update-zig<zig>.tar.gz` (about 5 MB). The packaging scripts
+make both. The Zig version in the name is `RONDO_ZIG_VERSION`. An installation downloads
+the update package only when that name matches its own Zig; otherwise it downloads the
+full package, so a Zig upgrade needs nothing special.
+
+To test without publishing:
+- `RONDO_UPDATE_URL` points the check at another release JSON, for example one served from
+  `http://127.0.0.1`.
+- `RONDO_UPDATE_FROM` makes the installation pretend to be an older version.
+- `rondo --autotest-update DIR` goes through the start screen and the Updates page,
+  installs the update, then restarts into `--autotest`.
+
+`tools/updtest/windows.sh` and `tools/updtest/linux.sh` run this against a local server for
+each case:
+- a normal update
+- the full package
+- a wrong SHA-256, which is refused
+- a package that cannot build, which is put back
+- the real latest release on GitHub
 
 ## Work plan
 

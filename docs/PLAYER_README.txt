@@ -69,6 +69,24 @@ loading save states, rewind, the cheats and Richter's run (hold LB) are off, and
 count as hardcore. Switching it on restarts the game. Without a connection the game plays
 as usual; unlocks made offline are sent when it is back.
 
+Updates
+-------
+When the game starts it asks GitHub (github.com/fhclimited/RondoRecomp) whether there is a
+newer version. If there is, the start screen says so under the title and beside Updates.
+The Updates page shows what is new; "Download and install" does the rest:
+1. Setup downloads the new version for your system. That is usually a few MB: the compiler
+   is only downloaded again when a new version needs a different one. The download is
+   checked against the SHA-256 checksum GitHub publishes for it.
+2. Its files take the place of the old ones next to the game. Your disc images, saves,
+   save states and options are not touched.
+3. Setup rebuilds the game from the new version (about a minute; longer on a Steam Deck),
+   and the game restarts as the new version.
+If anything goes wrong, the old version is put back and the page says what happened.
+"Check at launch" (on by default) turns the question to GitHub off; "Check now" asks
+anyway. RondoRecomp Setup's window also offers "Update to ..." when there is a new version,
+and on the command line: rondo_setup --update. This works from version 1.1 on: a copy of
+1.0 or older has to be replaced by hand once.
+
 Controls
 --------
 The defaults (change them on the menu's Controls page, see below):
@@ -125,8 +143,8 @@ Start screen
 rondo.exe opens on a start screen; the game itself starts only when you choose Play
 (START, Enter, A, or a click; it goes on to the game's title screen, past the logo and
 intro, unless Skip cinematics is Never). The menu also has the language, loading a save
-state, the option pages below, Setup (to add the other language's disc or rebuild;
-rondo.exe closes so Setup can rebuild it) and Quit. Controller, keyboard and mouse all
+state, the option pages below, Updates (see Updates above), Setup (to add the other
+language's disc or rebuild; rondo.exe closes so Setup can rebuild it) and Quit. Controller, keyboard and mouse all
 work; the line at the bottom of the menu says what the selected item does. Menu, Start
 screen comes back to it. Gameplay, Start screen at launch: Off goes straight into the
 game (rondo.exe --play does that once).
@@ -204,6 +222,8 @@ Command line
 rondo_setup.exe <disc.zip | disc.cue | folder>
                                           the same steps without a window
 rondo_setup.exe --rebuild                 recompile again with misses.txt
+rondo_setup.exe --update                  install the latest version from GitHub (--check:
+                                          only say whether there is one)
 (./rondo_setup on Linux)
 
 Status

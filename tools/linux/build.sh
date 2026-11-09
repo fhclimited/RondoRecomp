@@ -1,13 +1,16 @@
 #!/bin/bash
 # Builds the Linux release inside the Ubuntu 22.04 container (tools/package_release_linux.sh
 # runs it there): SDL3 from pinned sources, Setup and the SDK against it, the pinned Zig for
-# Linux, then dist/RondoRecomp-<version>-linux-x86_64.tar.gz. No game material: players
-# provide their own disc image to Setup, which builds `rondo` on their machine.
+# Linux, then dist/RondoRecomp-<version>-linux-x86_64.tar.gz and its update package (the same
+# without zig/: dist/RondoRecomp-<version>-linux-x86_64-update-zig<zig version>.tar.gz, see
+# tools/frontend/update.h). No game material: players provide their own disc image to Setup,
+# which builds `rondo` on their machine.
 #
 # Work files in build/linux (SDL3 and Zig are kept between runs; delete them to redo).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 VER=$(sed -n 's/^#define RONDO_VERSION "\(.*\)"/\1/p' tools/frontend/programs.h)
+ZIGV=$(sed -n 's/^#define RONDO_ZIG_VERSION "\(.*\)"/\1/p' tools/frontend/programs.h)
 L=$PWD/build/linux
 S=$L/src
 DEPS=$L/deps
@@ -58,6 +61,7 @@ install -m 644 "$L/cmake/sdk/lib/libSDL3.so.0" "$OUT/"
 cp -r "$L/cmake/sdk" "$OUT/sdk"
 find "$OUT/sdk" -type d -exec chmod 755 {} + && find "$OUT/sdk" -type f -exec chmod 644 {} +
 tar -xf "$S/$ZIG.tar.xz" -C "$P" && mv "$P/$ZIG" "$OUT/zig"
+[ "$("$OUT/zig/zig" version)" = "$ZIGV" ] || { echo "zig/ is not $ZIGV (RONDO_ZIG_VERSION in programs.h)"; exit 1; }
 install -m 644 docs/PLAYER_README.txt "$OUT/README.txt"
 strip "$OUT/rondo_setup" "$OUT/RondoRecomp Setup"
 
@@ -100,7 +104,10 @@ strip "$OUT/rondo_setup" "$OUT/RondoRecomp Setup"
 chmod 644 "$OUT/THIRD_PARTY.txt"
 
 mkdir -p dist
+rm -f dist/RondoRecomp-*-linux-x86_64*.tar.gz
 TGZ=dist/RondoRecomp-$VER-linux-x86_64.tar.gz
+UPD=dist/RondoRecomp-$VER-linux-x86_64-update-zig$ZIGV.tar.gz
 tar -czf "$TGZ" -C "$P" --owner=0 --group=0 --numeric-owner RondoRecomp
-echo "release: $TGZ ($(du -sh "$TGZ" | cut -f1); $(du -sh "$OUT" | cut -f1) unpacked)"
+tar -czf "$UPD" -C "$P" --owner=0 --group=0 --numeric-owner --exclude=RondoRecomp/zig RondoRecomp
+echo "release: $TGZ ($(du -sh "$TGZ" | cut -f1); $(du -sh "$OUT" | cut -f1) unpacked), $UPD ($(du -sh "$UPD" | cut -f1))"
 rm -rf "$P"

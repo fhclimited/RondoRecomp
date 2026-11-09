@@ -27,6 +27,9 @@ typedef enum {
     MENU_ACH_LOGOUT,
     MENU_TEXT_START,       /* a text field was chosen: start text input (the Steam Deck's keyboard opens) */
     MENU_TEXT_END,         /* typing ended: stop text input, save the settings */
+    MENU_UPDATE_CHECK,     /* Updates page: ask GitHub again */
+    MENU_UPDATE_INSTALL,   /* ...download and install the newer version (Setup), then restart */
+    MENU_UPDATE_PAGE,      /* ...the release's web page */
 } MenuResult;
 
 typedef struct Menu {
@@ -46,6 +49,11 @@ typedef struct Menu {
     int editing;           /* 1 + the text field being typed into, 0 none */
     char password[128];    /* RetroAchievements: typed for Log in, then forgotten (never saved) */
     char ach[2][160];      /* RetroAchievements page: its status lines (the account, the game) */
+    char upd[5][160];      /* Updates page: this version, the news, what is new (or the progress) */
+    char notice[120];      /* start screen: a newer version is out (under the title) */
+    char upd_badge[32];    /* ...and beside its Updates row */
+    bool updating;         /* an update is being installed: the menu waits for it */
+    int upd_pct;           /* ...its step's progress, -1 none */
 } Menu;
 
 void menu_open(Menu *m);
@@ -73,6 +81,8 @@ MenuResult menu_text(Menu *m, Settings *s, const SDL_Event *ev);
 int menu_item_at(const Menu *m, SDL_Renderer *ren, float x, float y);
 void menu_hover(Menu *m, int item);
 MenuResult menu_click(Menu *m, Settings *s, int item);
+/* The item of the open page with this label, -1 if none (for tests that click it). */
+int menu_find(const Menu *m, const char *label);
 /* The middle of an item's row, in render coordinates (for tests that click it). */
 bool menu_item_center(const Menu *m, SDL_Renderer *ren, int item, float *x, float *y);
 

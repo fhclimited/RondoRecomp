@@ -69,7 +69,7 @@ if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
 
   add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c tools/frontend/game.c tools/frontend/prompt.c
     tools/frontend/input.c tools/frontend/binds.c tools/frontend/menu.c tools/frontend/settings.c tools/frontend/video.c tools/frontend/theme.c tools/frontend/ui_fonts.c
-    tools/frontend/http.c tools/frontend/achievements.c
+    tools/frontend/http.c tools/frontend/achievements.c tools/frontend/update.c tools/frontend/child.c
     runtime/recomp/recomp_none.c)
   target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR} tools/recomp)
   target_link_libraries(rondo PRIVATE pce rcheevos ${SDL3_LIBRARY})
@@ -99,14 +99,21 @@ if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
   # Setup: imports the player's disc image and builds rondo.exe with zig cc
   find_library(ZLIB_STATIC NAMES libz.a z HINTS "${_cc_prefix}/lib")
   if(ZLIB_STATIC)
-    add_executable(rondo_setup tools/setup/main.c tools/setup/zip.c runtime/recomp/recomp_none.c)
+    # updates (tools/setup/install.c): GitHub's releases, downloaded as the game's own requests are
+    set(SETUP_SOURCES tools/setup/main.c tools/setup/zip.c tools/setup/install.c
+      tools/frontend/http.c tools/frontend/update.c tools/frontend/child.c runtime/recomp/recomp_none.c)
+    add_executable(rondo_setup ${SETUP_SOURCES})
     target_include_directories(rondo_setup PRIVATE runtime ${SDL3_INCLUDE_DIR})
     target_link_libraries(rondo_setup PRIVATE recompgen ${SDL3_LIBRARY} ${ZLIB_STATIC})
     # the same Setup with a window (what players double-click)
-    add_executable(rondo_setup_gui WIN32 tools/setup/gui.c tools/setup/main.c tools/setup/zip.c runtime/recomp/recomp_none.c)
+    add_executable(rondo_setup_gui WIN32 tools/setup/gui.c ${SETUP_SOURCES})
     target_compile_definitions(rondo_setup_gui PRIVATE SETUP_GUI=1)
     target_include_directories(rondo_setup_gui PRIVATE runtime ${SDL3_INCLUDE_DIR})
     target_link_libraries(rondo_setup_gui PRIVATE recompgen ${SDL3_LIBRARY} ${ZLIB_STATIC})
+    if(WIN32)
+      target_link_libraries(rondo_setup PRIVATE winhttp)
+      target_link_libraries(rondo_setup_gui PRIVATE winhttp)
+    endif()
     set_target_properties(rondo_setup_gui PROPERTIES OUTPUT_NAME "RondoRecomp Setup")
     if(NOT WIN32)
       set_target_properties(rondo_setup rondo_setup_gui PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")

@@ -10,10 +10,10 @@
 #include "theme.h"
 #include "video.h"
 
-enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_START, PAGE_ACH, PAGE_COUNT };
+enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_START, PAGE_ACH, PAGE_UPDATE, PAGE_COUNT };
 
 /* IT_EDIT: a text field (arg 0: the Settings string at field, n_choices its size; arg 1: the
- * password, kept in the Menu); IT_INFO: a status line, Menu.ach[arg] */
+ * password, kept in the Menu); IT_INFO: a status line, Menu.ach[arg] (0-1), Menu.upd[arg - 2] */
 typedef enum { IT_ACTION, IT_PAGE, IT_CHOICE, IT_TOGGLE, IT_TEXT, IT_BACK, IT_BIND, IT_EDIT, IT_INFO } ItemKind;
 
 typedef struct Item {
@@ -72,6 +72,7 @@ static const Item START_ITEMS[] = {
     {IT_PAGE, "Cheats", PAGE_CHEATS, 0, NULL, 0, 0, 0},
     {IT_PAGE, "Controls", PAGE_CONTROLS, 0, NULL, 0, 0, 0},
     {IT_PAGE, "RetroAchievements", PAGE_ACH, 0, NULL, 0, 0, 0},
+    {IT_PAGE, "Updates", PAGE_UPDATE, 0, NULL, 0, 0, 0},
     {IT_ACTION, "Setup (add a disc, rebuild)", MENU_SETUP, 0, NULL, 0, 0, 0},
     {IT_ACTION, "Quit", MENU_QUIT, 0, NULL, 0, 0, 0},
 };
@@ -132,6 +133,19 @@ static const Item ACH_ITEMS[] = {
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 
+static const Item UPDATE_ITEMS[] = {
+    {IT_INFO, "", 2, 0, NULL, 0, 0, 0},
+    {IT_INFO, "", 3, 0, NULL, 0, 0, 0},
+    {IT_INFO, "", 4, 0, NULL, 0, 0, 0},
+    {IT_INFO, "", 5, 0, NULL, 0, 0, 0},
+    {IT_INFO, "", 6, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Download and install", MENU_UPDATE_INSTALL, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Check now", MENU_UPDATE_CHECK, 0, NULL, 0, 0, 0},
+    TOGGLE("Check at launch", check_updates, MENU_SETTINGS_CHANGED),
+    {IT_ACTION, "Release page", MENU_UPDATE_PAGE, 0, NULL, 0, 0, 0},
+    {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
+};
+
 /* parent -1: a root (the in-game menu, the start screen); the option pages return to
  * whichever root opened them */
 static const struct { const char *title; const Item *items; int n; int parent; } PAGES[PAGE_COUNT] = {
@@ -142,6 +156,7 @@ static const struct { const char *title; const Item *items; int n; int parent; }
     {"Controls", CONTROL_ITEMS, (int)(sizeof CONTROL_ITEMS / sizeof CONTROL_ITEMS[0]), PAGE_MAIN},
     {"Main Menu", START_ITEMS, (int)(sizeof START_ITEMS / sizeof START_ITEMS[0]), -1},
     {"Achievements", ACH_ITEMS, (int)(sizeof ACH_ITEMS / sizeof ACH_ITEMS[0]), PAGE_MAIN},
+    {"Updates", UPDATE_ITEMS, (int)(sizeof UPDATE_ITEMS / sizeof UPDATE_ITEMS[0]), PAGE_MAIN},
 };
 
 /* What the selected item does: the footer's help line. */
@@ -185,6 +200,11 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Password", "Used once to log in; only the login token is kept. A / Enter, type it, then Enter."},
     {"Log in", "Log in to RetroAchievements with the name and password above."},
     {"Log out", "Forget the login on this PC."},
+    {"Updates", "A newer version of Rondo Recomp: what is new, download and install it."},
+    {"Download and install", "Setup downloads the new version, puts it in place and rebuilds the game; it restarts."},
+    {"Check now", "Ask GitHub for the latest version again."},
+    {"Check at launch", "Ask GitHub (github.com/" "fhclimited/RondoRecomp) for a newer version at each launch."},
+    {"Release page", "Open the new version's page on GitHub in your web browser."},
 };
 
 static int parent_of(const Menu *m, int page)
@@ -247,6 +267,7 @@ bool menu_on_start_screen(const Menu *m) { return m->open && m->root == PAGE_STA
 
 MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
 {
+    if (m->updating) return MENU_NOTHING;   /* Setup is replacing the game's files */
     const Item *items = PAGES[m->page].items;
     int n = PAGES[m->page].n;
     int *sel = &m->sel[m->page];
@@ -526,6 +547,13 @@ int menu_item_at(const Menu *m, SDL_Renderer *ren, float x, float y)
     return -1;
 }
 
+int menu_find(const Menu *m, const char *label)
+{
+    for (int i = 0; i < PAGES[m->page].n; i++)
+        if (!strcmp(PAGES[m->page].items[i].label, label)) return i;
+    return -1;
+}
+
 bool menu_item_center(const Menu *m, SDL_Renderer *ren, int item, float *x, float *y)
 {
     if (item < 0 || item >= PAGES[m->page].n) return false;
@@ -613,10 +641,21 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
             continue;
         }
         if (it->kind == IT_INFO) {
-            const char *line = m->ach[it->arg];
+            const char *line = it->arg < 2 ? m->ach[it->arg] : m->upd[it->arg - 2];
             float w = (F->x1 - F->x0) - 80 * u;
-            th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px * 0.85f, line, w, 0), (F->x0 + F->x1) * 0.5f, y,
-                    th_fade(th_alpha(TH_GOLD, 220), a), line, 0.5f, 0.5f, 0, TH_NONE);
+            if (it->arg == 4 && m->updating && m->upd_pct >= 0) {   /* the step's progress */
+                float bx0 = F->x0 + 60 * u, bx1 = F->x1 - 60 * u, h = F->row_h * 0.16f;
+                float fill = bx0 + (bx1 - bx0) * (float)(m->upd_pct > 100 ? 100 : m->upd_pct) / 100.0f;
+                th_rect(ren, bx0, y - h, bx1, y + h, th_fade((SDL_Color){20, 16, 14, 220}, a));
+                th_rect_h(ren, bx0, y - h, fill, y + h, th_fade(th_alpha(TH_EMBER, 230), a), th_fade(TH_CANDLE, a));
+                th_rect_h(ren, bx0, y - h - 1.0f, bx1, y - h, th_fade(th_alpha(TH_GOLD, 120), a), th_fade(th_alpha(TH_GOLD, 40), a));
+                continue;
+            }
+            bool news = it->arg == 3 && (m->notice[0] || m->updating);   /* the line that matters */
+            th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px * (news ? 0.95f : 0.85f), line, w, 0),
+                    (F->x0 + F->x1) * 0.5f, y,
+                    th_fade(news ? (SDL_Color){255, 222, 150, 255} : it->arg >= 4 ? TH_TEXT : th_alpha(TH_GOLD, 220), a), line,
+                    0.5f, 0.5f, 0, news ? th_fade(th_alpha(TH_EMBER, 150), a) : TH_NONE);
             continue;
         }
         if (it->kind == IT_BIND) {
@@ -678,6 +717,12 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
             th_arrow(ren, F->x1 - 26 * u, y, F->row_h * 0.34f, true, arrow);
         } else if (it->kind == IT_PAGE) {
             th_arrow(ren, F->x1 - 26 * u, y, F->row_h * 0.34f, true, th_fade(sel ? TH_GOLD : th_alpha(TH_GOLD, 120), a));
+            if (it->arg == PAGE_UPDATE && m->upd_badge[0]) {   /* a newer version: says so, softly glowing */
+                float glow = 0.75f + 0.25f * sinf(t * 3.0f);
+                th_text(ren, TH_FONT_UI, F->text_px * 0.85f, F->x1 - 44 * u, y,
+                        th_fade((SDL_Color){255, 214, 120, (Uint8)(255 * glow)}, a), m->upd_badge, 1.0f, 0.5f, 0,
+                        th_fade(th_alpha(TH_EMBER, 160), a));
+            }
         }
     }
 }
@@ -689,10 +734,12 @@ static void draw_footer(SDL_Renderer *ren, const Frame *F, const Menu *m, float 
     th_rect_h(ren, F->x0 + 24 * u, F->foot_y, mx, F->foot_y + 1.0f, th_alpha(TH_GOLD, 0), th_fade(th_alpha(TH_GOLD, 110), a));
     th_rect_h(ren, mx, F->foot_y, F->x1 - 24 * u, F->foot_y + 1.0f, th_fade(th_alpha(TH_GOLD, 110), a), th_alpha(TH_GOLD, 0));
     const Item *it = &PAGES[m->page].items[m->sel[m->page]];
-    const char *help = m->status[0] ? m->status : selectable(it) ? item_help(m->page, it) : "";
+    const char *help = m->status[0] ? m->status : selectable(it) && !m->updating ? item_help(m->page, it) : "";
     th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 13.5f * u, help, w, 0), mx, F->foot_y + 18 * u,
             th_fade(m->status[0] ? TH_ACTION : TH_TEXT, a), help, 0.5f, 0.5f, 0, TH_NONE);
-    const char *hint = m->editing
+    const char *hint = m->updating
+                           ? "UPDATING  -  THE GAME RESTARTS WHEN IT IS DONE"
+                       : m->editing
                            ? "TYPE     BACKSPACE  DELETE     ENTER / A  DONE"
                        : m->capturing
                            ? "HOLD THE BUTTONS OR KEY  UNTIL THE COUNT ENDS     ESC  LEAVE IT"
@@ -723,6 +770,12 @@ static void draw_start_title(SDL_Renderer *ren, const Frame *F, const Menu *m, f
     if (m->info[1][0])
         th_text(ren, TH_FONT_UI, 10 * u, x, y + 164 * u, th_fade(TH_TEXT_DIM, a), m->info[1], 0.5f, 0.5f, 0.5f * u,
                 th_fade(th_alpha((SDL_Color){0, 0, 0, 255}, 150), a));
+    if (m->notice[0]) {   /* a newer version is out */
+        float glow = 0.8f + 0.2f * sinf(t * 2.5f);
+        th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 13 * u, m->notice, 420 * u, 0), x, y + 190 * u,
+                th_fade((SDL_Color){255, 218, 140, (Uint8)(255 * glow)}, a), m->notice, 0.5f, 0.5f, 0,
+                th_fade(th_alpha(TH_EMBER, 170), a));
+    }
 }
 
 void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)

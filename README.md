@@ -42,6 +42,9 @@ Findings so far: [docs/findings.md](docs/findings.md).
   hardcore mode through RetroAchievements' own client library (rcheevos), for both discs.
 - Windows and Linux (x86-64, glibc 2.35 or newer: the Steam Deck, Ubuntu 22.04, Debian 12,
   Fedora 36, Arch and later).
+- Updates from the game itself: the start screen says when a new release is out, and its
+  Updates page downloads it (a few MB), checks it, installs it, rebuilds the game and
+  restarts it. See [docs/distribution.md](docs/distribution.md#updates).
 
 ## For players
 

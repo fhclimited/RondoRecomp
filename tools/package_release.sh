@@ -1,11 +1,14 @@
 #!/bin/bash
-# Assembles the release folder dist/RondoRecomp and dist/RondoRecomp-<version>-windows-x64.zip.
+# Assembles the release folder dist/RondoRecomp and dist/RondoRecomp-<version>-windows-x64.zip,
+# and the update package (the same without zig/, which installations already have):
+# dist/RondoRecomp-<version>-windows-x64-update-zig<zig version>.zip (tools/frontend/update.h).
 # The release contains no game material: players provide their own disc image to Setup.
 #
 # usage: tools/package_release.sh [version]   (default: RONDO_VERSION, tools/frontend/programs.h)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VER=${1:-$(sed -n 's/^#define RONDO_VERSION "\(.*\)"/\1/p' tools/frontend/programs.h)}
+ZIGV=$(sed -n 's/^#define RONDO_ZIG_VERSION "\(.*\)"/\1/p' tools/frontend/programs.h)
 B=build
 LIC=/c/msys64/ucrt64/share/licenses
 
@@ -13,11 +16,12 @@ LIC=/c/msys64/ucrt64/share/licenses
 cmake --build $B
 
 OUT=dist/RondoRecomp
-rm -rf "$OUT" dist/RondoRecomp-*-windows-x64.zip   # (the Linux release, also in dist/, is kept)
+rm -rf "$OUT" dist/RondoRecomp-*-windows-x64*.zip   # (the Linux release, also in dist/, is kept)
 mkdir -p "$OUT"
 cp "$B/RondoRecomp Setup.exe" "$B/rondo_setup.exe" "$B/SDL3.dll" "$B/libiconv-2.dll" "$OUT/"
 cp -r "$B/sdk" "$OUT/sdk"
 cp -r build/zig "$OUT/zig"
+[ "$("$OUT/zig/zig.exe" version)" = "$ZIGV" ] || { echo "zig/ is not $ZIGV (RONDO_ZIG_VERSION in programs.h)"; exit 1; }
 cp docs/PLAYER_README.txt "$OUT/README.txt"
 
 {
@@ -55,4 +59,16 @@ cp docs/PLAYER_README.txt "$OUT/README.txt"
 } > "$OUT/THIRD_PARTY.txt"
 
 (cd dist && python -m zipfile -c "RondoRecomp-$VER-windows-x64.zip" RondoRecomp)
-echo "release: $OUT ($(du -sh "$OUT" | cut -f1)), dist/RondoRecomp-$VER-windows-x64.zip ($(du -sh "dist/RondoRecomp-$VER-windows-x64.zip" | cut -f1))"
+UPD=RondoRecomp-$VER-windows-x64-update-zig$ZIGV.zip
+(cd dist && python -c '
+import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for root, dirs, files in os.walk("RondoRecomp"):
+        if root == "RondoRecomp":
+            dirs.remove("zig")
+        dirs.sort()
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            z.write(p, p.replace(os.sep, "/"))
+' "$UPD")
+echo "release: $OUT ($(du -sh "$OUT" | cut -f1)), dist/RondoRecomp-$VER-windows-x64.zip ($(du -sh "dist/RondoRecomp-$VER-windows-x64.zip" | cut -f1)), dist/$UPD ($(du -sh "dist/$UPD" | cut -f1))"

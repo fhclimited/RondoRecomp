@@ -13,6 +13,10 @@ typedef struct Request {
     int status;
     char *body;
     size_t len, cap;
+    SDL_IOStream *file;            /* http_get_file: the body goes here instead */
+    long long got, total;          /* ...bytes so far, of total (0 unknown) */
+    HttpProgress progress;
+    bool cancelled, write_failed;
     struct Request *next;
 } Request;
 
@@ -45,6 +49,16 @@ static void fail(Request *r, const char *why)
     r->status = 0;
     r->len = 0;
     append(r, why, strlen(why));
+}
+
+/* the body as it arrives: into memory, or (http_get_file) into the file, with progress */
+static bool take(Request *r, const void *data, size_t n)
+{
+    if (!r->file) return append(r, data, n);
+    if (SDL_WriteIO(r->file, data, n) != n) { r->write_failed = true; return false; }
+    r->got += (long long)n;
+    if (r->progress && !r->progress(r->got, r->total, r->userdata)) { r->cancelled = true; return false; }
+    return true;
 }
 
 #ifdef _WIN32
@@ -97,7 +111,7 @@ static void perform(Request *r)
             if (!WinHttpQueryDataAvailable(q, &avail) || avail == 0) break;
             if (avail > sizeof buf) avail = sizeof buf;
             if (!WinHttpReadData(q, buf, avail, &got) || got == 0) break;
-            if (!append(r, buf, got)) break;
+            if (!take(r, buf, got)) break;
         }
     } else {
         char why[64];
@@ -120,6 +134,8 @@ struct curl_slist;
 #define CURLOPT_HTTPHEADER 10023
 #define CURLOPT_WRITEFUNCTION 20011
 #define CURLOPT_TIMEOUT 13
+#define CURLOPT_LOW_SPEED_LIMIT 19
+#define CURLOPT_LOW_SPEED_TIME 20
 #define CURLOPT_FOLLOWLOCATION 52
 #define CURLOPT_CONNECTTIMEOUT 78
 #define CURLOPT_NOSIGNAL 99
@@ -171,7 +187,7 @@ static bool backend_ready(void)
 
 static size_t on_data(char *data, size_t size, size_t n, void *userdata)
 {
-    return append(userdata, data, size * n) ? size * n : 0;
+    return take(userdata, data, size * n) ? size * n : 0;
 }
 
 static void perform(Request *r)
@@ -186,7 +202,12 @@ static void perform(Request *r)
     curl.easy_setopt(h, CURLOPT_NOSIGNAL, 1L);
     curl.easy_setopt(h, CURLOPT_FOLLOWLOCATION, 1L);
     curl.easy_setopt(h, CURLOPT_CONNECTTIMEOUT, 15L);
-    curl.easy_setopt(h, CURLOPT_TIMEOUT, 30L);
+    if (r->file) {   /* a download takes as long as it takes, unless it stalls for 30 s */
+        curl.easy_setopt(h, CURLOPT_LOW_SPEED_LIMIT, 1L);
+        curl.easy_setopt(h, CURLOPT_LOW_SPEED_TIME, 30L);
+    } else {
+        curl.easy_setopt(h, CURLOPT_TIMEOUT, 30L);
+    }
     if (r->post) {
         headers = curl.slist_append(NULL, "Content-Type: application/x-www-form-urlencoded");
         curl.easy_setopt(h, CURLOPT_HTTPHEADER, headers);
@@ -269,4 +290,51 @@ void http_poll(void)
         release(rev);
         rev = n;
     }
+}
+
+int http_get_file(const char *url, const char *user_agent, const char *path, long long expected, HttpProgress progress,
+                  void *userdata, char *err, size_t errlen)
+{
+    err[0] = 0;
+    if (!backend_ready()) { snprintf(err, errlen, "%s", error); return 0; }
+    Request r;
+    memset(&r, 0, sizeof r);
+    r.url = (char *)url;
+    r.agent = (char *)(user_agent ? user_agent : "RondoRecomp");
+    r.file = SDL_IOFromFile(path, "wb");
+    if (!r.file) { snprintf(err, errlen, "cannot write %s: %s", path, SDL_GetError()); return 0; }
+    r.total = expected;
+    r.progress = progress;
+    r.userdata = userdata;
+    perform(&r);
+    if (!SDL_CloseIO(r.file) && !r.write_failed) r.write_failed = true;
+    if (r.write_failed) snprintf(err, errlen, "cannot write %s (is the disk full?)", path);
+    else if (r.cancelled) snprintf(err, errlen, "cancelled");
+    else if (r.status == 0) snprintf(err, errlen, "%s", r.body ? r.body : "no answer");
+    else if (r.status != 200) snprintf(err, errlen, "the server answered %d", r.status);
+    free(r.body);
+    return r.write_failed || r.cancelled ? 0 : r.status;
+}
+
+int http_get_text(const char *url, const char *user_agent, char **body, size_t *len, char *err, size_t errlen)
+{
+    err[0] = 0;
+    *body = NULL;
+    *len = 0;
+    if (!backend_ready()) { snprintf(err, errlen, "%s", error); return 0; }
+    Request r;
+    memset(&r, 0, sizeof r);
+    r.url = (char *)url;
+    r.agent = (char *)(user_agent ? user_agent : "RondoRecomp");
+    perform(&r);
+    if (r.status == 0) {
+        snprintf(err, errlen, "%s", r.body ? r.body : "no answer");
+        free(r.body);
+        return 0;
+    }
+    if (r.status != 200) snprintf(err, errlen, "the server answered %d", r.status);
+    if (!r.body) append(&r, "", 0);
+    *body = r.body;
+    *len = r.len;
+    return r.status;
 }

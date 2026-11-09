@@ -44,6 +44,8 @@ typedef struct Settings {
     bool ra_hardcore;
     char ra_user[64];
     char ra_token[64];
+    /* updates (update.h): ask GitHub for a newer release at launch */
+    bool check_updates;
     /* controls (binds.h): a controller button and a key for each action */
     int bind_pad[ACT_COUNT];
     int bind_key[ACT_COUNT];

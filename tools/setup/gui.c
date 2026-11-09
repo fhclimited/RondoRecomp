@@ -1,19 +1,23 @@
 /* RondoRecomp Setup, windowed: choose your zipped disc image, watch it being turned into
  * rondo.exe (rondo on Linux), then play. Runs the same steps as rondo_setup
  * (tools/setup/main.c) in a worker thread; text is drawn with SDL3's built-in debug font, so
- * no font files are needed. */
+ * no font files are needed. It also asks GitHub for a newer version (../frontend/update.h)
+ * and offers to install it (rondo_setup --update). */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "../frontend/http.h"
 #include "../frontend/programs.h"
+#include "../frontend/update.h"
 
 int setup_main(int argc, char **argv);
 extern void (*setup_line_hook)(const char *text);
 extern void (*setup_progress_hook)(const char *what, int pct);
 
 enum { IDLE, RUNNING, DONE, FAILED };
+enum { MODE_IMPORT, MODE_REBUILD, MODE_UPDATE };
 
 #define MAX_LINES 300
 #define COLS 76
@@ -25,7 +29,9 @@ static char prog_what[128];
 static int prog_pct = -1;
 static SDL_AtomicInt state;
 static char input_path[1024];
-static bool rebuild_mode;
+static int run_mode;
+static int run_result;     /* setup_main's: 3 when there was nothing to update */
+static bool updated;
 static char base_dir[1024];
 
 static void push_line(const char *text)
@@ -71,7 +77,8 @@ static int SDLCALL worker(void *arg)
     char *argv[8];
     int argc = 0;
     argv[argc++] = "RondoRecomp Setup";
-    if (rebuild_mode) argv[argc++] = "--rebuild";
+    if (run_mode == MODE_REBUILD) argv[argc++] = "--rebuild";
+    else if (run_mode == MODE_UPDATE) argv[argc++] = "--update";
     else argv[argc++] = input_path;
     argv[argc++] = "--out";
     argv[argc++] = base_dir;
@@ -81,13 +88,15 @@ static int SDLCALL worker(void *arg)
     if (partial[0]) { push_line(partial); partial[0] = 0; }
     prog_pct = -1;
     SDL_UnlockMutex(mtx);
-    SDL_SetAtomicInt(&state, r == 0 ? DONE : FAILED);
+    run_result = r;
+    if (run_mode == MODE_UPDATE && r == 0) updated = true;
+    SDL_SetAtomicInt(&state, r == 0 || (run_mode == MODE_UPDATE && r == 3) ? DONE : FAILED);
     return r;
 }
 
-static void start(bool rebuild)
+static void start(int mode)
 {
-    rebuild_mode = rebuild;
+    run_mode = mode;
     SDL_LockMutex(mtx);
     n_lines = 0;
     partial[0] = 0;
@@ -105,7 +114,7 @@ static void SDLCALL on_pick(void *userdata, const char *const *files, int filter
     (void)filter;
     if (!files || !files[0]) return;                 /* cancelled */
     snprintf(input_path, sizeof input_path, "%s", files[0]);
-    start(false);
+    start(MODE_IMPORT);
 }
 
 static bool exists(const char *name)
@@ -116,7 +125,7 @@ static bool exists(const char *name)
 }
 
 typedef struct Button { float x, y, w, h; const char *label; int id; } Button;
-enum { B_CHOOSE = 1, B_FOLDER, B_PLAY, B_REBUILD, B_QUIT };
+enum { B_CHOOSE = 1, B_FOLDER, B_PLAY, B_REBUILD, B_QUIT, B_UPDATE };
 
 static bool hit(const Button *b, float mx, float my)
 {
@@ -144,6 +153,7 @@ int main(int argc, char **argv)
     mtx = SDL_CreateMutex();
     setup_line_hook = gui_line;
     setup_progress_hook = gui_progress;
+    update_check_start();   /* a newer version on GitHub? (answered in the loop: http_poll) */
 
     SDL_Window *win = SDL_CreateWindow("RondoRecomp Setup", 1280, 800, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = win ? SDL_CreateRenderer(win, NULL) : NULL;
@@ -156,8 +166,14 @@ int main(int argc, char **argv)
     while (running) {
         int st = SDL_GetAtomicInt(&state);
         bool have_game = exists("game"), have_exe = exists(GAME_PROGRAM);
-        Button buttons[5];
+        http_poll();
+        const UpdateInfo *news = NULL;
+        bool can_update = update_state(&news, NULL) == UPD_AVAILABLE && !updated && have_game;
+        static char update_label[40];
+        if (can_update) snprintf(update_label, sizeof update_label, "Update to %s", news->version);
+        Button buttons[6];
         int nb = 0;
+        if (can_update && st != RUNNING) buttons[nb++] = (Button){456, 10, 160, 22, update_label, B_UPDATE};
         if (st == IDLE || st == DONE || st == FAILED) {
             /* the disc: a zip (or a .cue file), or the folder it was unzipped to */
             buttons[nb++] = (Button){24, 340, 140, 32, "Disc zip...", B_CHOOSE};
@@ -185,7 +201,9 @@ int main(int argc, char **argv)
                     } else if (buttons[i].id == B_FOLDER) {
                         SDL_ShowOpenFolderDialog(on_pick, NULL, win, NULL, false);
                     } else if (buttons[i].id == B_REBUILD) {
-                        start(true);
+                        start(MODE_REBUILD);
+                    } else if (buttons[i].id == B_UPDATE) {
+                        start(MODE_UPDATE);
                     } else if (buttons[i].id == B_PLAY) {
                         char exe[1100];
                         snprintf(exe, sizeof exe, "%s" GAME_PROGRAM, base_dir);
@@ -205,6 +223,13 @@ int main(int argc, char **argv)
         SDL_RenderDebugText(ren, 24, 16, "RondoRecomp Setup");
         SDL_SetRenderDrawColor(ren, 170, 160, 180, 255);
         SDL_RenderDebugText(ren, 24, 30, "Turns your own copy of Castlevania: Rondo of Blood into a native PC game.");
+        if (can_update && st == IDLE) {
+            char line[120];
+            snprintf(line, sizeof line, "RondoRecomp %s is available (this is " RONDO_VERSION "): click Update.", news->version);
+            SDL_SetRenderDrawColor(ren, 255, 214, 120, 255);
+            SDL_RenderDebugText(ren, 24, 44, line);
+            SDL_SetRenderDrawColor(ren, 170, 160, 180, 255);
+        }
 
         SDL_LockMutex(mtx);
         if (st == IDLE) {
@@ -244,7 +269,12 @@ int main(int argc, char **argv)
             }
         }
         SDL_UnlockMutex(mtx);
-        if (st == DONE) { SDL_SetRenderDrawColor(ren, 140, 220, 140, 255); SDL_RenderDebugText(ren, 24, 324, "Done. " GAME_PROGRAM " is ready."); }
+        if (st == DONE) {
+            SDL_SetRenderDrawColor(ren, 140, 220, 140, 255);
+            SDL_RenderDebugText(ren, 24, 324, run_mode != MODE_UPDATE ? "Done. " GAME_PROGRAM " is ready."
+                                              : run_result == 3        ? "This is the latest version."
+                                                                       : "Updated. Click Play.");
+        }
         if (st == FAILED) { SDL_SetRenderDrawColor(ren, 240, 120, 110, 255); SDL_RenderDebugText(ren, 24, 324, "Setup did not finish; see the messages above."); }
         for (int i = 0; i < nb; i++) draw_button(ren, &buttons[i], hit(&buttons[i], mx, my));
         SDL_RenderPresent(ren);

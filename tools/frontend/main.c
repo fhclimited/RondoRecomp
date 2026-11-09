@@ -2,6 +2,7 @@
  * cheats.
  *
  * usage: rondo [game.cue] [--play] [--autotest] [--autotest-features DIR] [--autotest-start]
+ *              [--test-achievements] [--autotest-update DIR]
  *   With no disc argument it uses the disc Setup installed, then the remembered disc, then
  *   searches the folders around the executable, then asks once with a file picker and
  *   remembers the choice. It opens on the start screen (Play, language, options; the game
@@ -17,6 +18,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #include "achievements.h"
 #include "capture_script.h"
@@ -32,6 +36,7 @@
 #include "video.h"
 #include "prompt.h"
 #include "programs.h"
+#include "update.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
 #define AUDIO_RATE 44100
@@ -288,6 +293,126 @@ static bool open_setup(char *status, size_t n)
     return true;
 }
 
+/* ---- updates (update.h) -------------------------------------------------------------- */
+
+static SDL_EnumerationResult SDLCALL remove_visit(void *ctx, const char *dir, const char *name)
+{
+    (void)ctx;
+    char path[1200];
+    snprintf(path, sizeof path, "%s%s%s", dir, dir[0] && dir[strlen(dir) - 1] != '/' && dir[strlen(dir) - 1] != '\\' ? "/" : "", name);
+    SDL_PathInfo info;
+    if (SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_DIRECTORY) SDL_EnumerateDirectory(path, remove_visit, NULL);
+    SDL_RemovePath(path);
+    return SDL_ENUM_CONTINUE;
+}
+
+/* What an update left next to the game (the old files that were in use then): removed now,
+ * but for any still in use. */
+static void update_leftovers(void)
+{
+    const char *base = SDL_GetBasePath();
+    char dir[1100];
+    snprintf(dir, sizeof dir, "%supdate", base ? base : "");
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(dir, &info) || info.type != SDL_PATHTYPE_DIRECTORY) return;
+    SDL_EnumerateDirectory(dir, remove_visit, NULL);
+    SDL_RemovePath(dir);
+}
+
+/* The Updates page's lines, the start screen's notice, and an update being installed
+ * (Setup): its progress. True once it is installed: the game restarts. */
+static bool update_tick(Menu *m)
+{
+    const UpdateInfo *info;
+    const char *why;
+    UpdateState st = update_state(&info, &why);
+    for (int i = 0; i < 5; i++) m->upd[i][0] = 0;
+    m->notice[0] = m->upd_badge[0] = 0;
+    if (m->updating) {
+        char line[160];
+        int pct;
+        UpdateRun r = update_run_poll(line, sizeof line, &pct);
+        m->upd_pct = pct;
+        snprintf(m->upd[0], sizeof m->upd[0], "Updating to Rondo Recomp %s", info ? info->version : "");
+        if (pct >= 0) snprintf(m->upd[1], sizeof m->upd[1], "%.120s  %d%%", line, pct);
+        else snprintf(m->upd[1], sizeof m->upd[1], "%s", line);
+        snprintf(m->upd[3], sizeof m->upd[3], "Setup downloads it, puts it in place and rebuilds the game.");
+        snprintf(m->upd[4], sizeof m->upd[4], "The game restarts when it is done (about a minute).");
+        if (r == RUN_INSTALLED) {
+            snprintf(m->upd[1], sizeof m->upd[1], "Installed: restarting...");
+            return true;
+        }
+        if (r == RUN_LATEST || r == RUN_FAILED) {
+            m->updating = false;
+            m->upd_pct = -1;
+            snprintf(m->status, sizeof m->status, "%s", line);
+        }
+        return false;
+    }
+    snprintf(m->upd[0], sizeof m->upd[0], "This is Rondo Recomp %s.", update_current_version());
+    switch (st) {
+    case UPD_IDLE: snprintf(m->upd[1], sizeof m->upd[1], "Check now asks GitHub for a newer version."); break;
+    case UPD_CHECKING: snprintf(m->upd[1], sizeof m->upd[1], "Asking GitHub for the latest version..."); break;
+    case UPD_LATEST: snprintf(m->upd[1], sizeof m->upd[1], "This is the latest version."); break;
+    case UPD_FAILED: snprintf(m->upd[1], sizeof m->upd[1], "Could not check for updates: %.110s", why); break;
+    case UPD_AVAILABLE:
+        snprintf(m->upd[1], sizeof m->upd[1], "Version %s is available: %.1f MB to download.", info->version,
+                 (double)info->size / 1e6);
+        for (int i = 0; i < 3; i++)
+            if (info->notes[i][0]) snprintf(m->upd[2 + i], sizeof m->upd[0], "- %.150s", info->notes[i]);
+        snprintf(m->notice, sizeof m->notice, "Version %s is available  -  see Updates", info->version);
+        snprintf(m->upd_badge, sizeof m->upd_badge, "%s available", info->version);
+        break;
+    }
+    return false;
+}
+
+static void update_install(Menu *m)
+{
+    const UpdateInfo *info;
+    UpdateState st = update_state(&info, NULL);
+    if (!menu_on_start_screen(m)) {
+        snprintf(m->status, sizeof m->status, "Leave the game for the start screen first.");
+        return;
+    }
+    if (st != UPD_AVAILABLE) {
+        snprintf(m->status, sizeof m->status, st == UPD_CHECKING ? "Still asking GitHub: a moment."
+                                                                 : "There is no newer version to install.");
+        return;
+    }
+    const char *base = SDL_GetBasePath();
+    char setup[1100], err[200];
+    snprintf(setup, sizeof setup, "%s" SETUP_CLI_PROGRAM, base ? base : "");
+    if (!SDL_GetPathInfo(setup, NULL)) {
+        snprintf(m->status, sizeof m->status, SETUP_CLI_PROGRAM " is not next to " GAME_PROGRAM ".");
+        return;
+    }
+    if (!update_run_start(setup, err, sizeof err)) {
+        snprintf(m->status, sizeof m->status, "Cannot start Setup: %.100s", err);
+        return;
+    }
+    m->updating = true;
+    m->upd_pct = -1;
+    m->status[0] = 0;
+}
+
+/* After an update: the new game in place of this one (args: its arguments, NULL-terminated). */
+static void relaunch(const char *const *args)
+{
+    const char *base = SDL_GetBasePath();
+    static char exe[1100];
+    snprintf(exe, sizeof exe, "%s" GAME_PROGRAM, base ? base : "");
+    const char *argv[8] = {exe};
+    for (int i = 0; args[i] && i < 6; i++) argv[i + 1] = args[i];
+#ifdef _WIN32
+    SDL_Process *p = SDL_CreateProcess(argv, false);   /* a windowed program: no console */
+    if (p) SDL_DestroyProcess(p);
+#else
+    SDL_Quit();
+    execv(exe, (char *const *)argv);                   /* the same process: Steam keeps track of it */
+#endif
+}
+
 static void state_path(char *out, size_t n, const Session *ss, int slot)
 {
     snprintf(out, n, "%sstates/slot%d%s.state", pref_dir, slot, ss->language == LANG_JA ? "-ja" : "");
@@ -369,13 +494,16 @@ int main(int argc, char **argv)
      * --autotest-features DIR: play the capture script with cheats and automatic cinematic
      * skipping, take screenshots of the video modes and menu into DIR, then quit. */
     bool autotest = false, play_now = false, autotest_start = false, test_ach = false;
-    const char *features_dir = NULL, *disc_arg = NULL;
+    const char *features_dir = NULL, *disc_arg = NULL, *update_dir = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autotest")) autotest = true;
         else if (!strcmp(argv[i], "--play")) play_now = true;
         else if (!strcmp(argv[i], "--autotest-features") && i + 1 < argc) features_dir = argv[++i];
         else if (!strcmp(argv[i], "--autotest-start")) autotest_start = true;
         else if (!strcmp(argv[i], "--test-achievements")) test_ach = true;   /* the discs' hashes, asked of the server */
+        /* --autotest-update DIR: the start screen's notice, the Updates page, Download and
+         * install (with RONDO_UPDATE_URL / RONDO_UPDATE_FROM), then the new game's --autotest */
+        else if (!strcmp(argv[i], "--autotest-update") && i + 1 < argc) update_dir = argv[++i];
         else disc_arg = argv[i];
     }
     char autotest_log[2048] = "";
@@ -384,7 +512,7 @@ int main(int argc, char **argv)
     locate_profile_dir(pref_dir, sizeof pref_dir);
     char settings_path[1100], states_dir[1100];
     snprintf(settings_path, sizeof settings_path, "%ssettings.ini", pref_dir);
-    if (autotest || features_dir || autotest_start || test_ach) {
+    if (autotest || features_dir || autotest_start || test_ach || update_dir) {
         /* test runs keep their state files apart from the player's */
         no_save_files = true;
         size_t l = strlen(pref_dir);
@@ -395,7 +523,7 @@ int main(int argc, char **argv)
     SDL_CreateDirectory(states_dir);
     Settings set;
     settings_load(&set, settings_path);
-    bool test_mode = autotest || features_dir || autotest_start || test_ach;
+    bool test_mode = autotest || features_dir || autotest_start || test_ach || update_dir;
     if (test_mode) {   /* fixed options; nothing is saved */
         settings_default(&set);
         if (features_dir) {
@@ -489,10 +617,16 @@ int main(int argc, char **argv)
      * through the queue), 300 frames later the title screen (Play skips the logo and intro);
      * then from power-on again, START (Enter) during the intro's story text skips it too */
     int t_start_loops = 0, t_phase = 0, t_phase_at = 0;
-    if ((!test_mode && !play_now && set.start_screen) || autotest_start) {
+    if ((!test_mode && !play_now && set.start_screen) || autotest_start || update_dir) {
         menu_open_start_screen(&menu);
         start_screen_info(&menu, &ss, &set, disc_path);
     }
+    update_leftovers();
+    if ((set.check_updates && !test_mode) || update_dir) update_check_start();
+    bool restart = false, told_update = false;
+    int t_upd_phase = 0, t_upd_loops = 0;
+    bool t_upd_shot = false;
+    char t_upd_shot_path[1200] = "";   /* taken once the frame is drawn */
     const double frame_ns = 1e9 / FRAME_RATE;
     double audio_frac = 0.0;
     static int16_t samples[2048 * 2];
@@ -578,10 +712,67 @@ int main(int argc, char **argv)
                 running = false;
             }
         }
+        if (update_dir) {   /* --autotest-update */
+            t_upd_loops++;
+            const UpdateInfo *ui;
+            const char *uwhy;
+            UpdateState ust = update_state(&ui, &uwhy);
+            /* a click goes in the loop after the screenshot of what it clicks on */
+            static const char *pending;
+            const char *click_on = pending;
+            pending = NULL;
+            if (t_upd_phase == 0 && ust == UPD_AVAILABLE && t_upd_loops > 30) {
+                TLOG("autotest-update: this is %s; GitHub (%s) has %s: %s, %lld bytes, sha256 %s%s\n",
+                     update_current_version(), update_api_url(), ui->version, ui->asset, ui->size,
+                     ui->sha256[0] ? ui->sha256 : "(none)", ui->slim ? " (without the compiler)" : "");
+                for (int i = 0; i < 4; i++) if (ui->notes[i][0]) TLOG("autotest-update: new: %s\n", ui->notes[i]);
+                TLOG("autotest-update: start screen notice: \"%s\", Updates row: \"%s\"\n", menu.notice, menu.upd_badge);
+                snprintf(t_upd_shot_path, sizeof t_upd_shot_path, "%s/update_start_screen.bmp", update_dir);
+                pending = "Updates";
+                t_upd_phase = 1;
+            } else if (t_upd_phase == 0 && (ust == UPD_LATEST || ust == UPD_FAILED || t_upd_loops > 3600)) {
+                TLOG("autotest-update: NO UPDATE FOUND (%s)\n", ust == UPD_FAILED ? uwhy : ust == UPD_LATEST ? "latest" : "timeout");
+                running = false;
+            } else if (t_upd_phase == 1 && t_upd_loops > 60) {
+                snprintf(t_upd_shot_path, sizeof t_upd_shot_path, "%s/update_page.bmp", update_dir);
+                pending = "Download and install";
+                t_upd_phase = 2;
+                t_upd_loops = 0;
+            } else if (t_upd_phase == 2 && menu.updating && !t_upd_shot && menu.upd_pct >= 30 && menu.upd_pct <= 90) {
+                snprintf(t_upd_shot_path, sizeof t_upd_shot_path, "%s/update_progress.bmp", update_dir);
+                TLOG("autotest-update: installing: \"%s\" (%d%%)\n", menu.upd[1], menu.upd_pct);
+                t_upd_shot = true;
+            } else if (t_upd_phase == 2 && !menu.updating && t_upd_loops > 20) {
+                TLOG("autotest-update: UPDATE DID NOT INSTALL: %s\n", menu.status);
+                running = false;
+            } else if (t_upd_phase == 2 && t_upd_loops > 60 * 60 * 15) {
+                TLOG("autotest-update: UPDATE TIMED OUT\n");
+                running = false;
+            }
+            if (click_on) {
+                float px = 0, py = 0, wx = 0, wy = 0;
+                menu_item_center(&menu, ren, menu_find(&menu, click_on), &px, &py);
+                SDL_RenderCoordinatesToWindow(ren, px, py, &wx, &wy);
+                SDL_Event click = {0};
+                click.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+                click.button.windowID = SDL_GetWindowID(win);
+                click.button.button = SDL_BUTTON_LEFT;
+                click.button.down = true;
+                click.button.clicks = 1;
+                click.button.which = TEST_INPUT;
+                click.button.x = wx;
+                click.button.y = wy;
+                SDL_PushEvent(&click);
+            }
+        }
         bool start_pressed = false, skip_pressed = false;
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_EVENT_QUIT) { running = false; continue; }
+            if (ev.type == SDL_EVENT_QUIT) {
+                if (menu.updating) snprintf(menu.status, sizeof menu.status, "Wait for the update to finish.");
+                else running = false;
+                continue;
+            }
             /* test runs only take the input they send themselves (marked TEST_INPUT), so a key
              * pressed on the desktop while one runs cannot change it */
             if (test_mode && !test_input(&ev)) continue;
@@ -712,6 +903,20 @@ int main(int argc, char **argv)
                     SDL_StopTextInput(win);
                     if (!test_mode) settings_save(&set, settings_path);
                     break;
+                case MENU_UPDATE_CHECK:
+                    update_check_start();
+                    menu.status[0] = 0;
+                    break;
+                case MENU_UPDATE_INSTALL:
+                    update_install(&menu);
+                    break;
+                case MENU_UPDATE_PAGE: {
+                    const UpdateInfo *ui;
+                    update_state(&ui, NULL);
+                    if (!SDL_OpenURL(ui && ui->page[0] ? ui->page : "https://github.com/" UPDATE_REPO "/releases/latest"))
+                        snprintf(menu.status, sizeof menu.status, "Cannot open a web browser: %.80s", SDL_GetError());
+                    break;
+                }
                 default:
                     break;
                 }
@@ -795,6 +1000,14 @@ int main(int argc, char **argv)
             skipping = was_rewinding = skip_to_title = false;
         }
         if (menu.open) ach_status(menu.ach[0], sizeof menu.ach[0], menu.ach[1], sizeof menu.ach[1]);
+        if (update_tick(&menu)) {             /* installed: the new version takes over */
+            restart = true;
+            running = false;
+        }
+        if (!told_update && menu.notice[0]) {  /* a newer version: said once (the start screen says it too) */
+            told_update = true;
+            if (!menu_on_start_screen(&menu)) show_osd("%s (start screen)", menu.notice);
+        }
 
         prompt.pad = input_pad_last(&in);
         prompt.line = prompt.pad ? (set.bind_pad[ACT_PAUSE] == SDL_GAMEPAD_BUTTON_START ? "PUSH  START  BUTTON!"
@@ -1164,6 +1377,10 @@ int main(int argc, char **argv)
         }
         if (menu.open) menu_draw(&menu, &set, ren);
         ach_draw(ren);                        /* unlocks, leaderboards: over everything */
+        if (t_upd_shot_path[0]) {             /* --autotest-update: this frame */
+            screenshot(ren, t_upd_shot_path);
+            t_upd_shot_path[0] = 0;
+        }
         SDL_RenderPresent(ren);
 
         if (features_dir && pce.frame >= 20100) {
@@ -1203,7 +1420,8 @@ int main(int argc, char **argv)
         const char *base = SDL_GetBasePath();
         char log_path[1024];
         if (base) {
-            snprintf(log_path, sizeof log_path, "%srondo.log", base);
+            /* the update test's own log: the new game's --autotest writes rondo.log */
+            snprintf(log_path, sizeof log_path, "%s%s", base, update_dir ? "rondo_update.log" : "rondo.log");
             FILE *lf = fopen(log_path, "w");
             if (lf) {
                 const RecompStats *rs = recomp_stats();
@@ -1226,6 +1444,10 @@ int main(int argc, char **argv)
     input_close(&in);
     video_free(&video);
     if (audio) SDL_DestroyAudioStream(audio);
+    if (restart) {
+        const char *none[] = {NULL}, *autotest_args[] = {"--autotest", NULL};
+        relaunch(update_dir ? autotest_args : none);   /* returns on Windows (and if it fails) */
+    }
     SDL_Quit();
     return 0;
 }

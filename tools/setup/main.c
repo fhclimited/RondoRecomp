@@ -4,6 +4,7 @@
  * usage: rondo_setup <disc.zip | disc.cue | folder> [--out DIR] [--sdk DIR] [--zig ZIG]
  *                    [--allow-unknown] [--no-build]
  *        rondo_setup --rebuild [--out DIR] ...   (reuse DIR/game, add DIR/misses.txt, rebuild)
+ *        rondo_setup --update [--check]          (the latest release from GitHub: install.c)
  *
  *   1. import    read the zip (or a .cue, or a folder with the unzipped image: its .cue files,
  *                subfolders too), find a CUE sheet whose files are all present
@@ -30,6 +31,7 @@
 #include "pce/discid.h"
 #include "../frontend/programs.h"
 #include "../recomp/gen.h"
+#include "setup.h"
 #include "zip.h"
 
 #define SETUP_VERSION RONDO_VERSION
@@ -58,7 +60,7 @@ static void cli_progress(const char *what, int pct)
 void (*setup_line_hook)(const char *text) = cli_line;
 void (*setup_progress_hook)(const char *what, int pct) = cli_progress;
 
-static void say(const char *fmt, ...)
+void say(const char *fmt, ...)
 {
     char buf[1024];
     va_list ap;
@@ -70,7 +72,7 @@ static void say(const char *fmt, ...)
 
 #define MAX_FILES 128
 
-static char g_err[512];
+char g_err[512];
 
 static bool ends_with(const char *s, const char *suffix)
 {
@@ -78,7 +80,7 @@ static bool ends_with(const char *s, const char *suffix)
     return a >= b && SDL_strcasecmp(s + a - b, suffix) == 0;
 }
 
-static void join(char *out, size_t n, const char *a, const char *b)
+void join(char *out, size_t n, const char *a, const char *b)
 {
     size_t l = strlen(a);
     bool sep = l && (a[l - 1] == '/' || a[l - 1] == '\\');
@@ -127,7 +129,7 @@ static SDL_EnumerationResult SDLCALL remove_visit(void *ctx, const char *dir, co
     return SDL_ENUM_CONTINUE;
 }
 
-static void remove_tree(const char *path)
+void remove_tree(const char *path)
 {
     SDL_PathInfo info;
     if (!SDL_GetPathInfo(path, &info)) return;
@@ -135,7 +137,7 @@ static void remove_tree(const char *path)
     SDL_RemovePath(path);
 }
 
-static bool make_dirs_for(const char *file)
+bool make_dirs_for(const char *file)
 {
     char dir[1024];
     dirname_of(dir, sizeof dir, file);
@@ -283,16 +285,8 @@ static bool generate(const char *game_cue, const char *gen_dir, const char *miss
     return gen_run(&go, &gs, gen_log, g_err, sizeof g_err);
 }
 
-static bool run(const char *const *args)
-{
-    SDL_Process *proc = SDL_CreateProcess(args, false);
-    if (!proc) { snprintf(g_err, sizeof g_err, "cannot start %s: %s", args[0], SDL_GetError()); return false; }
-    int code = -1;
-    SDL_WaitProcess(proc, true, &code);
-    SDL_DestroyProcess(proc);
-    if (code != 0) { snprintf(g_err, sizeof g_err, "%s failed (exit code %d)", basename_of(args[0]), code); return false; }
-    return true;
-}
+/* the compiler: its messages are passed on (and no console window opens on Windows) */
+static bool run(const char *const *args) { return setup_run(args); }
 
 #ifdef _WIN32
 /* The player's own icon for rondo.exe: icon.ico, else icon.png, next to Setup (RondoRecomp
@@ -366,7 +360,9 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     join(inc_rt, sizeof inc_rt, sdk, "src/runtime");
     join(inc_sdl, sizeof inc_sdl, sdk, "include");
     join(libdir, sizeof libdir, sdk, "lib");
-    join(exe, sizeof exe, out, GAME_PROGRAM);
+    /* linked in build/ first, then put in place (the one there may be running) */
+    join(exe, sizeof exe, out, "build/" GAME_PROGRAM);
+    SDL_RemovePath(exe);
     static char opt_i1[1200], opt_i2[1200], opt_i3[1200], opt_l[1200];
     snprintf(opt_i1, sizeof opt_i1, "-I%s", inc_rt);
     snprintf(opt_i2, sizeof opt_i2, "-I%s", inc_sdl);
@@ -444,6 +440,9 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     say("    compiling %d source files (runtime + recompiled game code; the first build also prepares\n"
            "    the C library, which takes longer)\n", sdk_files + gen_count);
     if (!run(args)) return false;
+    char final_exe[1100];
+    join(final_exe, sizeof final_exe, out, GAME_PROGRAM);
+    if (!setup_replace(out, exe, final_exe)) return false;
 
     /* the libraries the game loads, next to it */
 #ifdef _WIN32
@@ -462,10 +461,13 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
         if (!SDL_GetPathInfo(src, &si)) continue;
         /* already there (e.g. Setup itself runs from this folder with the same DLL loaded) */
         if (SDL_GetPathInfo(dst, &di) && di.size == si.size) continue;
-        if (!SDL_CopyFile(src, dst)) {
+        char fresh[1200];
+        snprintf(fresh, sizeof fresh, "%s.new", dst);
+        if (!SDL_CopyFile(src, fresh)) {
             snprintf(g_err, sizeof g_err, "cannot copy %s", src);
             return false;
         }
+        if (!setup_replace(out, fresh, dst)) return false;
     }
     return true;
 }
@@ -548,7 +550,7 @@ static int fail(const char *step)
 int setup_main(int argc, char **argv)
 {
     const char *input = NULL, *out_arg = NULL, *sdk_arg = NULL, *zig_arg = NULL;
-    bool allow_unknown = false, do_build = true, rebuild = false;
+    bool allow_unknown = false, do_build = true, rebuild = false, update = false, check = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--out") && i + 1 < argc) out_arg = argv[++i];
         else if (!strcmp(argv[i], "--sdk") && i + 1 < argc) sdk_arg = argv[++i];
@@ -556,11 +558,21 @@ int setup_main(int argc, char **argv)
         else if (!strcmp(argv[i], "--allow-unknown")) allow_unknown = true;
         else if (!strcmp(argv[i], "--no-build")) do_build = false;
         else if (!strcmp(argv[i], "--rebuild")) rebuild = true;
+        else if (!strcmp(argv[i], "--update")) update = true;
+        else if (!strcmp(argv[i], "--check")) check = true;
         else input = argv[i];
+    }
+    if (update) {
+        const char *base = SDL_GetBasePath();
+        char dir[1024];
+        snprintf(dir, sizeof dir, "%s", out_arg ? out_arg : (base ? base : "."));
+        absolute(dir, sizeof dir);
+        return setup_update(dir, check);
     }
     if (!input && !rebuild) {
         fprintf(stderr, "usage: rondo_setup <disc.zip | disc.cue | folder> [--out DIR] [--sdk DIR] [--zig ZIG] "
-                        "[--allow-unknown] [--no-build]\n       rondo_setup --rebuild [--out DIR] [--sdk DIR] [--zig ZIG]\n");
+                        "[--allow-unknown] [--no-build]\n       rondo_setup --rebuild [--out DIR] [--sdk DIR] [--zig ZIG]\n"
+                        "       rondo_setup --update [--check] [--out DIR]\n");
         return 2;
     }
     const char *base = SDL_GetBasePath();

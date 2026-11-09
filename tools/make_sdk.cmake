@@ -38,7 +38,9 @@ set(FRONTEND_SOURCES
   tools/frontend/theme.c
   tools/frontend/ui_fonts.c
   tools/frontend/http.c
-  tools/frontend/achievements.c)
+  tools/frontend/achievements.c
+  tools/frontend/update.c
+  tools/frontend/child.c)
 include("${SRC}/tools/rcheevos_sources.cmake")
 
 file(REMOVE_RECURSE "${OUT}")
