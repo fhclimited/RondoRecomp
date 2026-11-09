@@ -21,6 +21,7 @@ void settings_default(Settings *s)
     s->slot = 1;
     s->start_screen = true;
     s->language = LANG_EN;
+    s->ra_enabled = true;
     bind_defaults(s->bind_pad, s->bind_key);
 }
 
@@ -63,6 +64,10 @@ void settings_load(Settings *s, const char *path)
         else if (!strcmp(key, "disc_ja")) snprintf(s->disc_ja, sizeof s->disc_ja, "%s", val);
         else if (!strcmp(key, "start_screen")) s->start_screen = n != 0;
         else if (!strcmp(key, "disc_en")) snprintf(s->disc_en, sizeof s->disc_en, "%s", val);
+        else if (!strcmp(key, "retroachievements")) s->ra_enabled = n != 0;
+        else if (!strcmp(key, "ra_hardcore")) s->ra_hardcore = n != 0;
+        else if (!strcmp(key, "ra_user")) snprintf(s->ra_user, sizeof s->ra_user, "%s", val);
+        else if (!strcmp(key, "ra_token")) snprintf(s->ra_token, sizeof s->ra_token, "%s", val);
         else if (!strncmp(key, "bind_pad_", 9) || !strncmp(key, "bind_key_", 9)) {
             bool pad = key[5] == 'p';
             for (int a = 0; a < ACT_COUNT; a++)
@@ -92,6 +97,9 @@ bool settings_save(const Settings *s, const char *path)
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
             s->maria_unlocked, s->play_maria,
             s->language, s->disc_ja, s->disc_en);
+    fprintf(f, "# RetroAchievements: the account and its login token (not the password; Log out removes it)\n"
+               "retroachievements = %d\nra_hardcore = %d\nra_user = %s\nra_token = %s\n",
+            s->ra_enabled, s->ra_hardcore, s->ra_user, s->ra_token);
     fprintf(f, "# controls: controller buttons (SDL gamepad button numbers; 100 LT, 101 RT, -1 none) and keys\n"
                "# (SDL scancodes; 0 none), changed from the Controls page\n");
     for (int a = 0; a < ACT_COUNT; a++)

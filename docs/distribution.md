@@ -7,7 +7,10 @@ This is the same model as LASRecomp: tools are shipped, the game-specific code i
 ## What the player does
 
 1. Download the RondoRecomp release and unpack it anywhere.
-2. Run **RondoRecomp Setup** and choose the zip of their *Castlevania: Rondo of Blood* disc image.
+2. Run **RondoRecomp Setup** and choose the zip of their *Castlevania: Rondo of Blood* disc image
+   ("Disc zip...", which also takes a .cue file), or the folder it is unzipped in ("Disc
+   folder...": every .cue under it is checked where it is, and the first Rondo of Blood disc is
+   copied in).
 3. Setup checks the disc, extracts what it needs, recompiles the game code and produces `rondo.exe`.
 4. From then on: double-click `rondo.exe`.
 
@@ -83,6 +86,46 @@ zipped disc with no options, and the game ran at 99.9% native CPU cycles.
 
 Possible follow-ups: trim the Zig toolchain like LASRecomp's `tools/zig_slim.sh` does (most of
 the download), and an icon and version resource for the executables.
+
+## Linux (and the Steam Deck)
+
+```sh
+tools/package_release_linux.sh     # on Linux or in WSL, with podman
+                                   # -> dist/RondoRecomp-<version>-linux-x86_64.tar.gz
+```
+
+Built in an Ubuntu 22.04 container (`tools/linux/Containerfile`, `tools/linux/build.sh`), so it
+runs on glibc 2.35 or newer (SteamOS 3, Ubuntu 22.04, Debian 12, Fedora 36, Arch). The
+container builds:
+- SDL3 3.4.18, the version the Windows release uses. It is a shared library whose X11,
+  Wayland, PipeWire, PulseAudio, ALSA, D-Bus and udev backends load at run time, so it needs
+  only libc.
+- The Setup programs, linked against SDL3 with zlib static.
+- The SDK, with Zig 0.17.0 for Linux.
+
+The release folder is put together inside the container, so the archive keeps exact
+permissions: the programs are 755 and everything else 644.
+
+The release folder:
+
+| File | |
+|---|---|
+| `RondoRecomp Setup`, `rondo_setup` | Setup with a window, and from the command line |
+| `libSDL3.so.0` | used by Setup and the game; both find it next to themselves (`$ORIGIN`) |
+| `sdk/`, `zig/` | as on Windows (`sdk/lib/libSDL3.so.0` to link against) |
+
+Setup builds `rondo` with `zig cc -target x86_64-linux-gnu.2.35`. It links against glibc
+2.35's symbols whatever the machine has, plus `-D_DEFAULT_SOURCE`, because rcheevos uses
+`strdup` and `strcasecmp` and glibc hides them under `-std=c11`. The tests run the same on
+Linux (in WSL):
+- the package unpacked into an empty folder
+- Setup from a zip and from unzipped folders (both discs)
+- `--test-achievements` through the system's libcurl
+- `--autotest`, `--autotest-start` and `--autotest-features`
+
+RetroAchievements: the SDK carries rcheevos (`sdk/src/rcheevos`). `sdk/sources.txt` lists its
+sources, plus `-I` (relative to the SDK) and `-D` lines, which Setup passes to the compiler.
+On Windows the game also links `winhttp`.
 
 ## Work plan
 

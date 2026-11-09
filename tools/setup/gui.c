@@ -1,10 +1,13 @@
 /* RondoRecomp Setup, windowed: choose your zipped disc image, watch it being turned into
- * rondo.exe, then play. Runs the same steps as rondo_setup (tools/setup/main.c) in a worker
- * thread; text is drawn with SDL3's built-in debug font, so no font files are needed. */
+ * rondo.exe (rondo on Linux), then play. Runs the same steps as rondo_setup
+ * (tools/setup/main.c) in a worker thread; text is drawn with SDL3's built-in debug font, so
+ * no font files are needed. */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "../frontend/programs.h"
 
 int setup_main(int argc, char **argv);
 extern void (*setup_line_hook)(const char *text);
@@ -113,7 +116,7 @@ static bool exists(const char *name)
 }
 
 typedef struct Button { float x, y, w, h; const char *label; int id; } Button;
-enum { B_CHOOSE = 1, B_PLAY, B_REBUILD, B_QUIT };
+enum { B_CHOOSE = 1, B_FOLDER, B_PLAY, B_REBUILD, B_QUIT };
 
 static bool hit(const Button *b, float mx, float my)
 {
@@ -152,14 +155,16 @@ int main(int argc, char **argv)
     Uint64 t0 = SDL_GetTicks();
     while (running) {
         int st = SDL_GetAtomicInt(&state);
-        bool have_game = exists("game"), have_exe = exists("rondo.exe");
-        Button buttons[4];
+        bool have_game = exists("game"), have_exe = exists(GAME_PROGRAM);
+        Button buttons[5];
         int nb = 0;
         if (st == IDLE || st == DONE || st == FAILED) {
-            buttons[nb++] = (Button){24, 340, 200, 32, st == DONE ? "Choose another zip" : "Choose disc zip...", B_CHOOSE};
-            if (have_exe && st != FAILED) buttons[nb++] = (Button){240, 340, 120, 32, "Play", B_PLAY};
-            if (have_game && st != DONE) buttons[nb++] = (Button){376, 340, 120, 32, "Rebuild", B_REBUILD};
-            buttons[nb++] = (Button){512, 340, 104, 32, "Quit", B_QUIT};
+            /* the disc: a zip (or a .cue file), or the folder it was unzipped to */
+            buttons[nb++] = (Button){24, 340, 140, 32, "Disc zip...", B_CHOOSE};
+            buttons[nb++] = (Button){172, 340, 140, 32, "Disc folder...", B_FOLDER};
+            if (have_exe && st != FAILED) buttons[nb++] = (Button){320, 340, 90, 32, "Play", B_PLAY};
+            if (have_game && st != DONE) buttons[nb++] = (Button){418, 340, 100, 32, "Rebuild", B_REBUILD};
+            buttons[nb++] = (Button){526, 340, 90, 32, "Quit", B_QUIT};
         }
 
         SDL_Event ev;
@@ -177,11 +182,13 @@ int main(int argc, char **argv)
                         static const SDL_DialogFileFilter filters[] = {
                             {"Disc image (zip or cue)", "zip;cue"}, {"All files", "*"}};
                         SDL_ShowOpenFileDialog(on_pick, NULL, win, filters, 2, NULL, false);
+                    } else if (buttons[i].id == B_FOLDER) {
+                        SDL_ShowOpenFolderDialog(on_pick, NULL, win, NULL, false);
                     } else if (buttons[i].id == B_REBUILD) {
                         start(true);
                     } else if (buttons[i].id == B_PLAY) {
                         char exe[1100];
-                        snprintf(exe, sizeof exe, "%srondo.exe", base_dir);
+                        snprintf(exe, sizeof exe, "%s" GAME_PROGRAM, base_dir);
                         const char *args[] = {exe, NULL};
                         SDL_Process *p = SDL_CreateProcess(args, false);
                         if (p) { SDL_DestroyProcess(p); running = false; }
@@ -201,17 +208,18 @@ int main(int argc, char **argv)
 
         SDL_LockMutex(mtx);
         if (st == IDLE) {
-            SDL_RenderDebugText(ren, 24, 60, "1. Click \"Choose disc zip...\" and pick a zip of your disc image");
-            SDL_RenderDebugText(ren, 24, 72, "   (a .cue file with its .bin/.img/.iso/.wav tracks; a .cue also works).");
-            SDL_RenderDebugText(ren, 24, 84, "   The original Japanese disc or the English translation: either works.");
-            SDL_RenderDebugText(ren, 24, 100, "2. Setup checks the disc, extracts it, recompiles the game code");
-            SDL_RenderDebugText(ren, 24, 112, "   and builds rondo.exe in this folder. This takes about a minute.");
-            SDL_RenderDebugText(ren, 24, 128, "3. Click Play.");
-            SDL_RenderDebugText(ren, 24, 152, "Both languages: choose the other disc's zip afterwards; it is added");
-            SDL_RenderDebugText(ren, 24, 164, "next to the first, and the game's menu switches (Language).");
-            SDL_RenderDebugText(ren, 24, 188, "Rebuild: recompile again, including code rondo.exe recorded");
-            SDL_RenderDebugText(ren, 24, 200, "while you played (misses.txt).");
-            SDL_RenderDebugText(ren, 24, 224, "No game files are included with RondoRecomp.");
+            SDL_RenderDebugText(ren, 24, 60, "1. Your disc image: a .cue file with its .bin/.img/.iso/.wav tracks.");
+            SDL_RenderDebugText(ren, 24, 72, "   Zipped: click \"Disc zip...\" and pick the zip (or pick the .cue).");
+            SDL_RenderDebugText(ren, 24, 84, "   Unzipped: click \"Disc folder...\" and pick the folder it is in.");
+            SDL_RenderDebugText(ren, 24, 96, "   The original Japanese disc or the English translation: either works.");
+            SDL_RenderDebugText(ren, 24, 112, "2. Setup checks the disc, extracts it, recompiles the game code");
+            SDL_RenderDebugText(ren, 24, 124, "   and builds " GAME_PROGRAM " in this folder. This takes about a minute.");
+            SDL_RenderDebugText(ren, 24, 140, "3. Click Play.");
+            SDL_RenderDebugText(ren, 24, 164, "Both languages: choose the other disc afterwards; it is added next");
+            SDL_RenderDebugText(ren, 24, 176, "to the first, and the game's menu switches (Language).");
+            SDL_RenderDebugText(ren, 24, 200, "Rebuild: recompile again, including code " GAME_PROGRAM " recorded");
+            SDL_RenderDebugText(ren, 24, 212, "while you played (misses.txt).");
+            SDL_RenderDebugText(ren, 24, 236, "No game files are included with RondoRecomp.");
         } else {
             int first = n_lines > 30 ? n_lines - 30 : 0;
             float y = 52;
@@ -236,7 +244,7 @@ int main(int argc, char **argv)
             }
         }
         SDL_UnlockMutex(mtx);
-        if (st == DONE) { SDL_SetRenderDrawColor(ren, 140, 220, 140, 255); SDL_RenderDebugText(ren, 24, 324, "Done. rondo.exe is ready."); }
+        if (st == DONE) { SDL_SetRenderDrawColor(ren, 140, 220, 140, 255); SDL_RenderDebugText(ren, 24, 324, "Done. " GAME_PROGRAM " is ready."); }
         if (st == FAILED) { SDL_SetRenderDrawColor(ren, 240, 120, 110, 255); SDL_RenderDebugText(ren, 24, 324, "Setup did not finish; see the messages above."); }
         for (int i = 0; i < nb; i++) draw_button(ren, &buttons[i], hit(&buttons[i], mx, my));
         SDL_RenderPresent(ren);

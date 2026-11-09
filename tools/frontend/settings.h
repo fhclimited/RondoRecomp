@@ -38,6 +38,12 @@ typedef struct Settings {
     int language;          /* LANG_* */
     char disc_ja[1024];    /* the Japanese disc image (.cue) the player chose, if not installed by Setup */
     char disc_en[1024];    /* the same for the English (translated) disc */
+    /* RetroAchievements (achievements.h): the account's name and login token (never the
+     * password), whether achievements are on, and hardcore mode */
+    bool ra_enabled;
+    bool ra_hardcore;
+    char ra_user[64];
+    char ra_token[64];
     /* controls (binds.h): a controller button and a key for each action */
     int bind_pad[ACT_COUNT];
     int bind_key[ACT_COUNT];

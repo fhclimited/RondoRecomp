@@ -6,12 +6,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "programs.h"
 #include "theme.h"
 #include "video.h"
 
-enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_START, PAGE_COUNT };
+enum { PAGE_MAIN, PAGE_VIDEO, PAGE_GAMEPLAY, PAGE_CHEATS, PAGE_CONTROLS, PAGE_START, PAGE_ACH, PAGE_COUNT };
 
-typedef enum { IT_ACTION, IT_PAGE, IT_CHOICE, IT_TOGGLE, IT_TEXT, IT_BACK, IT_BIND } ItemKind;
+/* IT_EDIT: a text field (arg 0: the Settings string at field, n_choices its size; arg 1: the
+ * password, kept in the Menu); IT_INFO: a status line, Menu.ach[arg] */
+typedef enum { IT_ACTION, IT_PAGE, IT_CHOICE, IT_TOGGLE, IT_TEXT, IT_BACK, IT_BIND, IT_EDIT, IT_INFO } ItemKind;
 
 typedef struct Item {
     ItemKind kind;
@@ -53,6 +56,7 @@ static const Item MAIN_ITEMS[] = {
     {IT_PAGE, "Gameplay", PAGE_GAMEPLAY, 0, NULL, 0, 0, 0},
     {IT_PAGE, "Cheats", PAGE_CHEATS, 0, NULL, 0, 0, 0},
     {IT_PAGE, "Controls", PAGE_CONTROLS, 0, NULL, 0, 0, 0},
+    {IT_PAGE, "RetroAchievements", PAGE_ACH, 0, NULL, 0, 0, 0},
     CHOICE("Language", language, LANGS, 0, MENU_LANGUAGE),
     {IT_ACTION, "Reset game", MENU_RESET, 0, NULL, 0, 0, 0},
     {IT_ACTION, "Start screen", MENU_START_SCREEN, 0, NULL, 0, 0, 0},
@@ -67,6 +71,7 @@ static const Item START_ITEMS[] = {
     {IT_PAGE, "Gameplay", PAGE_GAMEPLAY, 0, NULL, 0, 0, 0},
     {IT_PAGE, "Cheats", PAGE_CHEATS, 0, NULL, 0, 0, 0},
     {IT_PAGE, "Controls", PAGE_CONTROLS, 0, NULL, 0, 0, 0},
+    {IT_PAGE, "RetroAchievements", PAGE_ACH, 0, NULL, 0, 0, 0},
     {IT_ACTION, "Setup (add a disc, rebuild)", MENU_SETUP, 0, NULL, 0, 0, 0},
     {IT_ACTION, "Quit", MENU_QUIT, 0, NULL, 0, 0, 0},
 };
@@ -115,6 +120,18 @@ static const Item CONTROL_ITEMS[] = {
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
 
+static const Item ACH_ITEMS[] = {
+    TOGGLE("RetroAchievements", ra_enabled, MENU_ACH_CHANGED),
+    TOGGLE("Hardcore mode", ra_hardcore, MENU_ACH_CHANGED),
+    {IT_EDIT, "User name", 0, offsetof(Settings, ra_user), NULL, (int)sizeof(((Settings *)0)->ra_user), 0, 0},
+    {IT_EDIT, "Password", 1, 0, NULL, (int)sizeof(((Menu *)0)->password), 0, 0},
+    {IT_ACTION, "Log in", MENU_ACH_LOGIN, 0, NULL, 0, 0, 0},
+    {IT_ACTION, "Log out", MENU_ACH_LOGOUT, 0, NULL, 0, 0, 0},
+    {IT_INFO, "", 0, 0, NULL, 0, 0, 0},
+    {IT_INFO, "", 1, 0, NULL, 0, 0, 0},
+    {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
+};
+
 /* parent -1: a root (the in-game menu, the start screen); the option pages return to
  * whichever root opened them */
 static const struct { const char *title; const Item *items; int n; int parent; } PAGES[PAGE_COUNT] = {
@@ -124,6 +141,7 @@ static const struct { const char *title; const Item *items; int n; int parent; }
     {"Cheats", CHEAT_ITEMS, (int)(sizeof CHEAT_ITEMS / sizeof CHEAT_ITEMS[0]), PAGE_MAIN},
     {"Controls", CONTROL_ITEMS, (int)(sizeof CONTROL_ITEMS / sizeof CONTROL_ITEMS[0]), PAGE_MAIN},
     {"Main Menu", START_ITEMS, (int)(sizeof START_ITEMS / sizeof START_ITEMS[0]), -1},
+    {"Achievements", ACH_ITEMS, (int)(sizeof ACH_ITEMS / sizeof ACH_ITEMS[0]), PAGE_MAIN},
 };
 
 /* What the selected item does: the footer's help line. */
@@ -154,13 +172,19 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Rewind", "Hold the Rewind control (LT / R unless changed) to play the game backwards."},
     {"Reset controls", "Every button and key back to its default."},
     {"Volume", "Sound volume."},
-    {"Start screen at launch", "Off: rondo.exe goes straight into the game."},
+    {"Start screen at launch", "Off: " GAME_PROGRAM " goes straight into the game."},
     {"Infinite health", "Health never goes down."},
     {"Infinite hearts", "Hearts stay at 99."},
     {"Infinite lives", "Lives never run out."},
     {"Maria unlocked", "The game offers Maria, as after rescuing her in Stage 2."},
     {"Play as Maria", "Every stage, the Prologue too, is played as Maria: from the next stage."},
     {"Back", "Back to the previous page."},
+    {"RetroAchievements", "Earn achievements at retroachievements.org: on / off, your account."},
+    {"Hardcore mode", "No save-state loading, rewind or cheats; unlocks count as hardcore. On restarts the game."},
+    {"User name", "Your retroachievements.org user name: A / Enter, type it, then Enter."},
+    {"Password", "Used once to log in; only the login token is kept. A / Enter, type it, then Enter."},
+    {"Log in", "Log in to RetroAchievements with the name and password above."},
+    {"Log out", "Forget the login on this PC."},
 };
 
 static int parent_of(const Menu *m, int page)
@@ -185,7 +209,14 @@ static void set_value(Settings *s, const Item *it, int v)
     else *(int *)p = v + it->base;
 }
 
-static bool selectable(const Item *it) { return it->kind != IT_TEXT; }
+static bool selectable(const Item *it) { return it->kind != IT_TEXT && it->kind != IT_INFO; }
+
+/* a text field's characters and their room */
+static char *edit_buffer(Menu *m, Settings *s, const Item *it, size_t *cap)
+{
+    *cap = (size_t)it->n_choices;
+    return it->arg == 1 ? m->password : (char *)s + it->field;
+}
 
 static int first_selectable(int page)
 {
@@ -254,6 +285,10 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
             m->key_after = false;
             snprintf(m->status, sizeof m->status, "Hold its button, two buttons (Back, then RB) or key until the count ends.");
             return MENU_NOTHING;
+        case IT_EDIT:
+            m->editing = *sel + 1;
+            snprintf(m->status, sizeof m->status, "Type, then Enter.  Steam Deck: Steam + X if the keyboard does not open.");
+            return MENU_TEXT_START;
         case IT_PAGE: m->page = it->arg; m->sel[m->page] = first_selectable(m->page); return MENU_NOTHING;
         case IT_BACK: m->page = parent_of(m, m->page); return MENU_NOTHING;
         case IT_CHOICE:
@@ -283,6 +318,48 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
 }
 
 bool menu_capturing(const Menu *m) { return m->open && m->capturing > 0; }
+
+bool menu_editing(const Menu *m) { return m->open && m->editing > 0; }
+
+MenuResult menu_text(Menu *m, Settings *s, const SDL_Event *ev)
+{
+    if (!m->editing) return MENU_NOTHING;
+    const Item *it = &PAGES[m->page].items[m->editing - 1];
+    size_t cap;
+    char *buf = edit_buffer(m, s, it, &cap);
+    bool end = false;
+    switch (ev->type) {
+    case SDL_EVENT_TEXT_INPUT: {
+        size_t l = strlen(buf), add = strlen(ev->text.text);
+        if (l + add < cap) memcpy(buf + l, ev->text.text, add + 1);
+        break;
+    }
+    case SDL_EVENT_KEY_DOWN:
+        if (ev->key.scancode == SDL_SCANCODE_BACKSPACE) {
+            size_t l = strlen(buf);
+            while (l > 0 && ((unsigned char)buf[l - 1] & 0xC0) == 0x80) l--;   /* a whole UTF-8 character */
+            if (l > 0) l--;
+            buf[l] = 0;
+        } else if (ev->key.scancode == SDL_SCANCODE_RETURN || ev->key.scancode == SDL_SCANCODE_KP_ENTER ||
+                   ev->key.scancode == SDL_SCANCODE_ESCAPE || ev->key.scancode == SDL_SCANCODE_TAB) {
+            end = true;
+        }
+        break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        end = ev->gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH || ev->gbutton.button == SDL_GAMEPAD_BUTTON_EAST ||
+              ev->gbutton.button == SDL_GAMEPAD_BUTTON_START;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        end = true;
+        break;
+    default:
+        break;
+    }
+    if (!end) return MENU_NOTHING;
+    m->editing = 0;
+    m->status[0] = 0;
+    return MENU_TEXT_END;
+}
 
 /* What the count would give now: CAPTURED and the control (*is_pad: a controller binding,
  * else a key), CAPTURED_NOTHING, or CAPTURED_TOO_MANY (three buttons or more). Buttons held
@@ -535,6 +612,13 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
             draw_table_row(ren, F, y, it->label, F->text_px * 0.95f, a);
             continue;
         }
+        if (it->kind == IT_INFO) {
+            const char *line = m->ach[it->arg];
+            float w = (F->x1 - F->x0) - 80 * u;
+            th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px * 0.85f, line, w, 0), (F->x0 + F->x1) * 0.5f, y,
+                    th_fade(th_alpha(TH_GOLD, 220), a), line, 0.5f, 0.5f, 0, TH_NONE);
+            continue;
+        }
         if (it->kind == IT_BIND) {
             char row[160];
             if (m->capturing == it->arg + 1) {
@@ -558,12 +642,33 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
         snprintf(label, sizeof label, "%s", it->label);
         if (it->kind == IT_ACTION && (it->arg == MENU_SAVE_STATE || it->arg == MENU_LOAD_STATE))
             snprintf(label, sizeof label, "%s  (slot %d)", it->label, s->slot);
-        bool value = it->kind == IT_CHOICE || it->kind == IT_TOGGLE;
+        bool value = it->kind == IT_CHOICE || it->kind == IT_TOGGLE || it->kind == IT_EDIT;
         float label_w = (F->x1 - F->x0) - (value ? 300 : 110) * u;
         SDL_Color lc = sel ? (SDL_Color){255, 248, 232, 255} : action ? TH_ACTION : TH_TEXT;
         th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, label, label_w, 0), F->x0 + 56 * u, y,
                 th_fade(lc, a), label, 0, 0.5f, 0, sel ? th_fade(th_alpha(TH_EMBER, 170), a) : TH_NONE);
-        if (value) {
+        if (it->kind == IT_EDIT) {
+            /* the field: what is typed (the password as stars), a caret while typing */
+            size_t cap;
+            const char *text = edit_buffer((Menu *)m, (Settings *)s, it, &cap);
+            char shown[160];
+            size_t n = strlen(text);
+            if (it->arg == 1) {
+                if (n > 40) n = 40;
+                memset(shown, '*', n);
+                shown[n] = 0;
+            } else {
+                snprintf(shown, sizeof shown, "%s", text);
+            }
+            bool typing = m->editing == i + 1;
+            if (typing && (SDL_GetTicks() / 500) % 2 == 0) strncat(shown, "_", sizeof shown - strlen(shown) - 1);
+            if (!shown[0] && !typing) snprintf(shown, sizeof shown, "-");
+            float box_x0 = F->x1 - 230 * u, box_x1 = F->x1 - 22 * u;
+            th_rect(ren, box_x0, y - F->row_h * 0.36f, box_x1, y + F->row_h * 0.36f,
+                    th_fade(typing ? (SDL_Color){60, 44, 26, 230} : (SDL_Color){20, 16, 14, 200}, a));
+            th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, shown, box_x1 - box_x0 - 16 * u, 0), box_x0 + 8 * u, y,
+                    th_fade(typing ? (SDL_Color){255, 230, 170, 255} : th_alpha(TH_GOLD, 210), a), shown, 0, 0.5f, 0, TH_NONE);
+        } else if (value) {
             const char *v = it->choices[get_value(s, it)];
             th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, v, 168 * u, 0), F->x1 - 120 * u, y,
                     th_fade(sel ? (SDL_Color){255, 214, 120, 255} : th_alpha(TH_GOLD, 210), a), v, 0.5f, 0.5f, 0,
@@ -587,7 +692,9 @@ static void draw_footer(SDL_Renderer *ren, const Frame *F, const Menu *m, float 
     const char *help = m->status[0] ? m->status : selectable(it) ? item_help(m->page, it) : "";
     th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 13.5f * u, help, w, 0), mx, F->foot_y + 18 * u,
             th_fade(m->status[0] ? TH_ACTION : TH_TEXT, a), help, 0.5f, 0.5f, 0, TH_NONE);
-    const char *hint = m->capturing
+    const char *hint = m->editing
+                           ? "TYPE     BACKSPACE  DELETE     ENTER / A  DONE"
+                       : m->capturing
                            ? "HOLD THE BUTTONS OR KEY  UNTIL THE COUNT ENDS     ESC  LEAVE IT"
                        : m->page == PAGE_START
                            ? "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     START  PLAY"

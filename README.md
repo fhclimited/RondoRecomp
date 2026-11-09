@@ -38,10 +38,16 @@ Findings so far: [docs/findings.md](docs/findings.md).
   Japanese story text uses a bundled public-domain kanji font in place of the System Card's).
 - Richter's run from Symphony of the Night (hold LB), and Maria cheats (unlocked; play as her
   from the Prologue on). See [docs/runtime.md](docs/runtime.md).
+- [RetroAchievements](https://retroachievements.org/game/4855): achievements, leaderboards and
+  hardcore mode through RetroAchievements' own client library (rcheevos), for both discs.
+- Windows and Linux (x86-64, glibc 2.35 or newer: the Steam Deck, Ubuntu 22.04, Debian 12,
+  Fedora 36, Arch and later).
 
 ## For players
 
-Download the release, run `RondoRecomp Setup.exe`, choose a zip of your own disc image, then
+Download the release (`RondoRecomp-<version>-windows-x64.zip`, or
+`RondoRecomp-<version>-linux-x86_64.tar.gz` for Linux and the Steam Deck), run
+`RondoRecomp Setup`, choose your own disc image (zipped, or the folder it is unzipped in), then
 click Play. See [docs/PLAYER_README.txt](docs/PLAYER_README.txt) and
 [docs/distribution.md](docs/distribution.md).
 

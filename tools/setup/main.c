@@ -1,18 +1,21 @@
-/* RondoRecomp Setup (command line): turns the player's own disc image into rondo.exe.
+/* RondoRecomp Setup (command line): turns the player's own disc image into rondo.exe (Windows)
+ * or rondo (Linux).
  *
- * usage: rondo_setup <disc.zip | disc.cue> [--out DIR] [--sdk DIR] [--zig ZIG] [--allow-unknown]
- *                    [--no-build]
+ * usage: rondo_setup <disc.zip | disc.cue | folder> [--out DIR] [--sdk DIR] [--zig ZIG]
+ *                    [--allow-unknown] [--no-build]
  *        rondo_setup --rebuild [--out DIR] ...   (reuse DIR/game, add DIR/misses.txt, rebuild)
  *
- *   1. import    read the zip (or .cue), find a CUE sheet whose files are all present
+ *   1. import    read the zip (or a .cue, or a folder with the unzipped image: its .cue files,
+ *                subfolders too), find a CUE sheet whose files are all present
  *   2. identify  PC Engine CD signature + boot-sector fingerprint (refuses unknown discs
  *                unless --allow-unknown)
  *   3. extract   to DIR/game (staged in DIR/game.tmp, renamed only after the check passes)
  *   4. generate  DIR/build/gen: the game's code recompiled to C (see docs/recompiler.md),
  *                using DIR/misses.txt from earlier play sessions as extra entry points
- *   5. build     zig cc: SDK runtime sources + generated code + SDL3 -> DIR/rondo.exe
+ *   5. build     zig cc: SDK runtime sources + generated code + SDL3 -> DIR/rondo.exe (DIR/rondo)
  *
- * Defaults: DIR = folder of this program, SDK = DIR/sdk, ZIG = DIR/zig/zig.exe.
+ * Defaults: DIR = folder of this program, SDK = DIR/sdk, ZIG = DIR/zig/zig.exe (DIR/zig/zig).
+ * Each system's Setup builds the game for its own system.
  */
 #include <SDL3/SDL.h>
 #ifndef SETUP_GUI
@@ -25,10 +28,23 @@
 #include <string.h>
 
 #include "pce/discid.h"
+#include "../frontend/programs.h"
 #include "../recomp/gen.h"
 #include "zip.h"
 
-#define SETUP_VERSION "0.13"
+#define SETUP_VERSION RONDO_VERSION
+
+#ifdef _WIN32
+#define ZIG_PROGRAM "zig/zig.exe"
+#define ZIG_TARGET "x86_64-windows-gnu"
+#define SDL_LINK "libSDL3.dll.a"   /* import library, in sdk/lib */
+#else
+#define ZIG_PROGRAM "zig/zig"
+/* glibc 2.35 (Ubuntu 22.04, SteamOS 3 and newer): zig links against that version's symbols,
+ * whichever the machine building has */
+#define ZIG_TARGET "x86_64-linux-gnu.2.35"
+#define SDL_LINK "libSDL3.so.0"    /* the library itself, in sdk/lib */
+#endif
 
 /* ---- output hooks (stdout for the command line; the GUI installs its own) ------------- */
 
@@ -278,9 +294,11 @@ static bool run(const char *const *args)
     return true;
 }
 
+#ifdef _WIN32
 /* The player's own icon for rondo.exe: icon.ico, else icon.png, next to Setup (RondoRecomp
  * ships none: no game artwork is included). A PNG goes into an .ico as it is (Windows takes
- * PNG images in icons). Writes build/rondo.rc for the compiler; false if there is no icon. */
+ * PNG images in icons). Writes build/rondo.rc for the compiler; false if there is no icon.
+ * Windows only: on Linux the launcher or Steam gives the game its picture. */
 static bool icon_resource(const char *out, char *rc_path, size_t n)
 {
     char ico[1100], png[1100], made[1100];
@@ -322,16 +340,15 @@ static bool icon_resource(const char *out, char *rc_path, size_t n)
     snprintf(quoted, sizeof quoted, "%s", use);
     for (char *c = quoted; *c; c++) if (*c == '\\') *c = '/';
     join(rc_path, n, out, "build/rondo.rc");
-#ifdef _WIN32
     /* zig's resource compiler cannot open a path that mixes \ and / */
     for (char *c = rc_path; *c; c++) if (*c == '/') *c = '\\';
-#endif
     char text[1300];
     snprintf(text, sizeof text, "1 ICON \"%s\"\n", quoted);
     if (!SDL_SaveFile(rc_path, text, strlen(text))) return false;
     say("  rondo.exe gets your icon (%s)\n", use == ico ? "icon.ico" : "icon.png");
     return true;
 }
+#endif
 
 static bool build(const char *sdk, const char *zig, const char *out, const char *gen_dir)
 {
@@ -342,43 +359,59 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     char *list = SDL_LoadFile(list_path, &len);
     if (!list) { snprintf(g_err, sizeof g_err, "SDK not found (%s)", list_path); return false; }
 
-    static char storage[512][1024];
-    const char *args[600];
+    static char storage[600][1024];
+    const char *args[700];
     int n = 0, s = 0;
     static char inc_rt[1100], inc_sdl[1100], libdir[1100], exe[1100];
     join(inc_rt, sizeof inc_rt, sdk, "src/runtime");
     join(inc_sdl, sizeof inc_sdl, sdk, "include");
     join(libdir, sizeof libdir, sdk, "lib");
-    join(exe, sizeof exe, out, "rondo.exe");
+    join(exe, sizeof exe, out, GAME_PROGRAM);
     static char opt_i1[1200], opt_i2[1200], opt_i3[1200], opt_l[1200];
     snprintf(opt_i1, sizeof opt_i1, "-I%s", inc_rt);
     snprintf(opt_i2, sizeof opt_i2, "-I%s", inc_sdl);
     snprintf(opt_i3, sizeof opt_i3, "-I%s", gen_dir);
-    join(opt_l, sizeof opt_l, libdir, "libSDL3.dll.a");   /* import library, passed by path */
+    join(opt_l, sizeof opt_l, libdir, SDL_LINK);   /* passed by path */
 
     args[n++] = zig;
     args[n++] = "cc";
     args[n++] = "-target";
-    args[n++] = "x86_64-windows-gnu";
+    args[n++] = ZIG_TARGET;
     args[n++] = "-O2";
     args[n++] = "-std=c11";
+#ifndef _WIN32
+    args[n++] = "-D_DEFAULT_SOURCE";          /* glibc: strdup, strcasecmp (rcheevos) under -std=c11 */
+#endif
     args[n++] = "-w";
     args[n++] = "-s";                          /* no debug info / .pdb */
     args[n++] = opt_i1;
     args[n++] = opt_i2;
     args[n++] = opt_i3;
-    for (char *line = strtok(list, "\r\n"); line && s < 64; line = strtok(NULL, "\r\n")) {
+    /* the SDK's sources, and options for them: -I<path relative to the SDK>, -D<define> */
+    int sdk_files = 0;
+    for (char *line = strtok(list, "\r\n"); line && s < 200; line = strtok(NULL, "\r\n")) {
         if (!*line || *line == '#') continue;
-        join(storage[s], sizeof storage[s], sdk, line);
+        if (!strncmp(line, "-I", 2)) {
+            snprintf(storage[s], sizeof storage[s], "-I");
+            join(storage[s] + 2, sizeof storage[s] - 2, sdk, line + 2);
+        } else if (!strncmp(line, "-D", 2)) {
+            snprintf(storage[s], sizeof storage[s], "%s", line);
+        } else {
+            join(storage[s], sizeof storage[s], sdk, line);
+            sdk_files++;
+        }
         args[n++] = storage[s++];
     }
+    int gen_count = 0;
     int count = 0;
     char **gen_files = SDL_GlobDirectory(gen_dir, "*.c", 0, &count);
-    for (int i = 0; gen_files && i < count && s < 512; i++) {
+    for (int i = 0; gen_files && i < count && s < 600; i++) {
         join(storage[s], sizeof storage[s], gen_dir, gen_files[i]);
         args[n++] = storage[s++];
+        gen_count++;
     }
     SDL_free(gen_files);
+#ifdef _WIN32
     /* the icon: compiled to a .res first (zig cc cannot build an .rc together with -s) */
     static char rc[1100], res[1100];
     if (icon_resource(out, rc, sizeof rc)) {
@@ -389,7 +422,13 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
         else say("  the icon could not be built (%s); rondo.exe keeps the default icon\n", g_err);
     }
     args[n++] = opt_l;
+    args[n++] = "-lwinhttp";                 /* RetroAchievements' server (tools/frontend/http.c) */
     args[n++] = "-Wl,--subsystem,windows";   /* GUI program: zig cc ignores -mwindows */
+#else
+    args[n++] = opt_l;
+    args[n++] = "-lm";
+    args[n++] = "-Wl,-rpath,$ORIGIN";        /* libSDL3.so.0 is found next to rondo */
+#endif
     args[n++] = "-o";
     args[n++] = exe;
     args[n] = NULL;
@@ -403,14 +442,20 @@ static bool build(const char *sdk, const char *zig, const char *out, const char 
     SDL_SetEnvironmentVariable(env, "ZIG_GLOBAL_CACHE_DIR", cache, true);
     SDL_SetEnvironmentVariable(env, "ZIG_LOCAL_CACHE_DIR", cache, true);
     say("    compiling %d source files (runtime + recompiled game code; the first build also prepares\n"
-           "    the C library, which takes longer)\n", s);
+           "    the C library, which takes longer)\n", sdk_files + gen_count);
     if (!run(args)) return false;
 
-    /* runtime DLLs */
+    /* the libraries the game loads, next to it */
+#ifdef _WIN32
     static const char *dlls[] = {"SDL3.dll", "libiconv-2.dll"};
+    const char *dll_dir = "bin";
+#else
+    static const char *dlls[] = {"libSDL3.so.0"};
+    const char *dll_dir = "lib";
+#endif
     for (size_t i = 0; i < sizeof dlls / sizeof dlls[0]; i++) {
         char src[1100], dst[1100];
-        join(src, sizeof src, sdk, "bin");
+        join(src, sizeof src, sdk, dll_dir);
         join(src, sizeof src, src, dlls[i]);
         join(dst, sizeof dst, out, dlls[i]);
         SDL_PathInfo si, di;
@@ -514,7 +559,7 @@ int setup_main(int argc, char **argv)
         else input = argv[i];
     }
     if (!input && !rebuild) {
-        fprintf(stderr, "usage: rondo_setup <disc.zip | disc.cue> [--out DIR] [--sdk DIR] [--zig ZIG] "
+        fprintf(stderr, "usage: rondo_setup <disc.zip | disc.cue | folder> [--out DIR] [--sdk DIR] [--zig ZIG] "
                         "[--allow-unknown] [--no-build]\n       rondo_setup --rebuild [--out DIR] [--sdk DIR] [--zig ZIG]\n");
         return 2;
     }
@@ -522,7 +567,7 @@ int setup_main(int argc, char **argv)
     char out[1024], sdk[1024], zig[1024], stage[1100], game[1100], gen_dir[1100], cue[1100];
     snprintf(out, sizeof out, "%s", out_arg ? out_arg : (base ? base : "."));
     if (sdk_arg) snprintf(sdk, sizeof sdk, "%s", sdk_arg); else join(sdk, sizeof sdk, out, "sdk");
-    if (zig_arg) snprintf(zig, sizeof zig, "%s", zig_arg); else join(zig, sizeof zig, out, "zig/zig.exe");
+    if (zig_arg) snprintf(zig, sizeof zig, "%s", zig_arg); else join(zig, sizeof zig, out, ZIG_PROGRAM);
     SDL_CreateDirectory(out);
     absolute(out, sizeof out);
     absolute(sdk, sizeof sdk);
@@ -547,6 +592,7 @@ int setup_main(int argc, char **argv)
                (unsigned long long)fp);
     } else {
         say("RondoRecomp Setup " SETUP_VERSION "\n\n[1/4] Importing %s\n", input);
+        SDL_PathInfo info;
         if (ends_with(input, ".zip")) {
             Zip z;
             if (!zip_open(&z, input, g_err, sizeof g_err)) return fail("opening the zip");
@@ -565,8 +611,35 @@ int setup_main(int argc, char **argv)
         } else if (ends_with(input, ".cue")) {
             if (!import_cue(input, stage, cue, sizeof cue)) { remove_tree(stage); return fail("importing"); }
             kind = discid_identify(cue, &fp);
+        } else if (SDL_GetPathInfo(input, &info) && info.type == SDL_PATHTYPE_DIRECTORY) {
+            /* the unzipped image: its .cue files (subfolders too), each checked where it is
+             * before anything is copied */
+            int count = 0, n_cues = 0;
+            char **files = SDL_GlobDirectory(input, NULL, 0, &count);   /* the whole tree ("*" stops at a folder) */
+            char found[1100] = "";
+            for (int i = 0; files && i < count && kind != DISC_RONDO; i++) {
+                if (!ends_with(files[i], ".cue")) continue;
+                n_cues++;
+                char path[1100];
+                join(path, sizeof path, input, files[i]);
+                say("  found %s\n", files[i]);
+                DiscKind k = discid_identify(path, &fp);
+                if (k == DISC_RONDO || (k == DISC_PCE_UNKNOWN && allow_unknown && !found[0])) {
+                    snprintf(found, sizeof found, "%s", path);
+                    kind = k;
+                } else {
+                    say("  skipped: %s\n", k == DISC_INVALID ? "not a readable PC Engine CD image (are its track files next to it?)"
+                                                            : "not a recognised Rondo of Blood disc");
+                }
+            }
+            SDL_free(files);
+            if (!n_cues) { snprintf(g_err, sizeof g_err, "no .cue file in %s", input); return fail("importing"); }
+            if (found[0]) {
+                if (!import_cue(found, stage, cue, sizeof cue)) { remove_tree(stage); return fail("importing"); }
+                kind = discid_identify(cue, &fp);
+            }
         } else {
-            snprintf(g_err, sizeof g_err, "expected a .zip or .cue file");
+            snprintf(g_err, sizeof g_err, "expected a .zip file, a .cue file or a folder");
             return fail("importing");
         }
 
@@ -611,13 +684,15 @@ int setup_main(int argc, char **argv)
     if (!generate(game_cue, gen_dir, misses, fp)) return fail("recompiling");
 
     if (!do_build) { say("\nDone (--no-build).\n"); return 0; }
-    say("\n[4/4] Building rondo.exe\n");
+    say("\n[4/4] Building " GAME_PROGRAM "\n");
     if (!SDL_GetPathInfo(zig, NULL)) {
         snprintf(g_err, sizeof g_err, "compiler not found at %s", zig);
         return fail("building");
     }
     if (!build(sdk, zig, out, gen_dir)) return fail("building");
-    say("\nDone: %s/rondo.exe\n", out);
+    char done[1100];
+    join(done, sizeof done, out, GAME_PROGRAM);
+    say("\nDone: %s\n", done);
     return 0;
 }
 

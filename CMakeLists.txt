@@ -28,6 +28,9 @@ add_library(pce STATIC
   runtime/util/png.c)
 target_include_directories(pce PUBLIC runtime)
 target_link_libraries(pce PUBLIC hucpu)
+if(NOT WIN32)
+  target_link_libraries(pce PUBLIC m)   # pow, fmod (Windows has them in its C library)
+endif()
 
 add_executable(rondo_headless tools/headless/main.c runtime/recomp/recomp_none.c tools/frontend/game.c tools/frontend/prompt.c)
 target_link_libraries(rondo_headless PRIVATE pce)
@@ -56,20 +59,42 @@ get_filename_component(_cc_prefix "${_cc_prefix}" DIRECTORY)
 find_path(SDL3_INCLUDE_DIR SDL3/SDL.h HINTS "${_cc_prefix}/include")
 find_library(SDL3_LIBRARY NAMES SDL3 HINTS "${_cc_prefix}/lib")
 if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
+  # RetroAchievements' client library (tools/frontend/achievements.c)
+  include(tools/rcheevos_sources.cmake)
+  list(TRANSFORM RCHEEVOS_SOURCES PREPEND third_party/rcheevos/)
+  add_library(rcheevos STATIC ${RCHEEVOS_SOURCES})
+  target_include_directories(rcheevos PUBLIC third_party/rcheevos/include)
+  target_compile_definitions(rcheevos PUBLIC ${RCHEEVOS_DEFINES})
+  target_compile_options(rcheevos PRIVATE -w)
+
   add_executable(rondo WIN32 tools/frontend/main.c tools/frontend/locate.c tools/frontend/game.c tools/frontend/prompt.c
     tools/frontend/input.c tools/frontend/binds.c tools/frontend/menu.c tools/frontend/settings.c tools/frontend/video.c tools/frontend/theme.c tools/frontend/ui_fonts.c
+    tools/frontend/http.c tools/frontend/achievements.c
     runtime/recomp/recomp_none.c)
   target_include_directories(rondo PRIVATE ${SDL3_INCLUDE_DIR} tools/recomp)
-  target_link_libraries(rondo PRIVATE pce ${SDL3_LIBRARY})
+  target_link_libraries(rondo PRIVATE pce rcheevos ${SDL3_LIBRARY})
+  if(WIN32)
+    target_link_libraries(rondo PRIVATE winhttp)
+  endif()
   get_filename_component(SDL3_LIBDIR "${SDL3_LIBRARY}" DIRECTORY)
-  # copy SDL3.dll and its non-system dependency so rondo.exe runs outside the toolchain shell
-  foreach(_dll SDL3.dll libiconv-2.dll)
-    find_file(_dll_path_${_dll} ${_dll} HINTS "${SDL3_LIBDIR}/../bin" NO_DEFAULT_PATH)
-    if(_dll_path_${_dll})
-      add_custom_command(TARGET rondo POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll_path_${_dll}}" "$<TARGET_FILE_DIR:rondo>")
-    endif()
-  endforeach()
+  if(WIN32)
+    # copy SDL3.dll and its non-system dependency so rondo.exe runs outside the toolchain shell
+    foreach(_dll SDL3.dll libiconv-2.dll)
+      find_file(_dll_path_${_dll} ${_dll} HINTS "${SDL3_LIBDIR}/../bin" NO_DEFAULT_PATH)
+      if(_dll_path_${_dll})
+        add_custom_command(TARGET rondo POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll_path_${_dll}}" "$<TARGET_FILE_DIR:rondo>")
+      endif()
+    endforeach()
+    set(SDL3_SDK_LIB "${SDL3_LIBDIR}/libSDL3.dll.a")
+  else()
+    # Linux: the programs find libSDL3.so.0 next to themselves ($ORIGIN), as in the release
+    # folder, so it is copied there (the file itself, not the symlink)
+    set(SDL3_SDK_LIB "${SDL3_LIBDIR}/libSDL3.so.0")
+    add_custom_command(TARGET rondo POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL3_SDK_LIB}" "$<TARGET_FILE_DIR:rondo>")
+    set_target_properties(rondo PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
+  endif()
 
   # Setup: imports the player's disc image and builds rondo.exe with zig cc
   find_library(ZLIB_STATIC NAMES libz.a z HINTS "${_cc_prefix}/lib")
@@ -83,6 +108,9 @@ if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
     target_include_directories(rondo_setup_gui PRIVATE runtime ${SDL3_INCLUDE_DIR})
     target_link_libraries(rondo_setup_gui PRIVATE recompgen ${SDL3_LIBRARY} ${ZLIB_STATIC})
     set_target_properties(rondo_setup_gui PROPERTIES OUTPUT_NAME "RondoRecomp Setup")
+    if(NOT WIN32)
+      set_target_properties(rondo_setup rondo_setup_gui PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
+    endif()
   else()
     message(STATUS "zlib not found: rondo_setup is not built")
   endif()
@@ -90,7 +118,7 @@ if(SDL3_INCLUDE_DIR AND SDL3_LIBRARY)
   # SDK that Setup compiles from: build/sdk
   add_custom_target(sdk ALL
     COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${CMAKE_BINARY_DIR}/sdk
-            -DSDL_INC=${SDL3_INCLUDE_DIR} -DSDL_LIB=${SDL3_LIBDIR}/libSDL3.dll.a
+            -DSDL_INC=${SDL3_INCLUDE_DIR} -DSDL_LIB=${SDL3_SDK_LIB}
             -DSDL_BIN=${SDL3_LIBDIR}/../bin -P ${CMAKE_SOURCE_DIR}/tools/make_sdk.cmake
     COMMENT "Assembling the Setup SDK")
 else()

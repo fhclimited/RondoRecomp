@@ -2,25 +2,72 @@ RondoRecomp
 ===========
 
 Turns your own copy of Castlevania: Rondo of Blood (PC Engine Super CD-ROM2) into a
-native Windows program. No game files are included: you provide your own disc image.
+native Windows or Linux program (the Steam Deck too). No game files are included: you
+provide your own disc image.
 
 What you need
 -------------
-A zip of your disc image: the .cue file together with the track files it lists
-(.bin, .img, .iso and/or .wav). The files may be inside a folder in the zip.
+Your disc image: the .cue file together with the track files it lists (.bin, .img, .iso
+and/or .wav), either zipped (the files may be inside a folder in the zip) or unzipped in a
+folder of their own.
 Either disc works: the original Japanese release (Akumajou Dracula X: Chi no Rondo) or
 the English fan translation. With both, you can switch languages in the game.
 
 How to use it
 -------------
 1. Unpack this folder anywhere you can write to (not Program Files).
-2. Run "RondoRecomp Setup.exe" and click "Choose disc zip...".
+2. Run "RondoRecomp Setup.exe". For a zipped disc image click "Disc zip..." and pick the
+   zip (or the .cue file); for an unzipped one click "Disc folder..." and pick the folder
+   the .cue file is in (subfolders are searched too).
 3. Setup checks the disc, extracts it to the game folder, recompiles the game's code
    into native code and builds rondo.exe in this folder. This takes about a minute
    (the first build prepares the bundled C compiler's runtime once).
 4. Click Play. From then on, start rondo.exe directly.
-To add the other language, run Setup again and choose that disc's zip: it is installed
+To add the other language, run Setup again and choose that disc: it is installed
 next to the first (game\en and game\ja) instead of replacing it.
+
+Linux and Steam Deck
+--------------------
+The Linux download (RondoRecomp-<version>-linux-x86_64.tar.gz) works the same way. Its
+programs have no .exe: "RondoRecomp Setup", rondo_setup, and the game, rondo. It needs a
+64-bit PC with glibc 2.35 or newer: SteamOS 3 on the Steam Deck, Ubuntu 22.04, Debian 12,
+Fedora 36, Arch, or later.
+
+On the Steam Deck:
+1. Switch to Desktop Mode (Steam button, Power, Switch to Desktop).
+2. Put the .tar.gz and your disc zip on the Deck (download them, or copy them over). In
+   Dolphin, the file manager, right-click the .tar.gz and choose Extract, Extract archive
+   here, for example in your home folder.
+3. Open the RondoRecomp folder and double-click "RondoRecomp Setup" (if asked, choose to
+   run it). Click "Disc zip..." and pick your zip (or "Disc folder..." for an unzipped
+   image), and wait until it says Done.
+4. Add the game to Steam: open Steam, Games, Add a Non-Steam Game to My Library, Browse...,
+   choose the file "rondo" in the RondoRecomp folder, then Add Selected Programs.
+5. Return to Gaming Mode (the "Return to Gaming Mode" icon on the desktop). The game is in
+   your library under Non-Steam.
+The Deck's controls are an Xbox controller to the game: View is Back, Menu is Start, L1 and
+R1 are LB and RB, L2 and R2 are LT and RT. Save states as Back + RB work the same way (View +
+R1). Options, saves and states are kept in ~/.local/share/RondoRecomp/RondoRecomp/.
+To log in to RetroAchievements in Gaming Mode, choose User name or Password: Steam's
+keyboard opens (Steam + X opens it if it does not). Achievements need the system's libcurl,
+which SteamOS and the usual desktop distributions have.
+
+RetroAchievements
+-----------------
+Rondo of Blood has achievements and leaderboards at RetroAchievements
+(https://retroachievements.org/game/4855). Both discs count: the English patch and the
+Japanese original are the same game there. To earn them:
+1. Make a free account at retroachievements.org.
+2. In the game's menu, RetroAchievements: choose User name and type it, then Password, then
+   Log in. Only the login token RetroAchievements sends back is kept (in settings.ini), never
+   the password. Log out forgets it.
+3. Play. When the game starts, a notice shows how many achievements you have; each one you
+   earn pops up as it unlocks, and leaderboard attempts show their progress at the top right.
+   The page shows your account and the game's progress.
+Hardcore mode (off by default) is RetroAchievements' stricter way to play: while it is on,
+loading save states, rewind, the cheats and Richter's run (hold LB) are off, and unlocks
+count as hardcore. Switching it on restarts the game. Without a connection the game plays
+as usual; unlocks made offline are sent when it is back.
 
 Controls
 --------
@@ -107,6 +154,8 @@ Gameplay   Skip cinematics: Press START, Automatically, or Never. During the log
            has shown them; Automatically goes there at once. Story scenes in the game have
            no skip of their own: START (or Automatically) runs them through fast instead
            Rewind on/off, volume, Start screen at launch on/off
+RetroAchievements
+           On / off, hardcore mode, your account (see RetroAchievements above)
 Cheats     Infinite health, infinite hearts (always 99), infinite lives
            Maria unlocked: the game offers Maria as it does after you rescue her in Stage 2
            (and your save keeps it)
@@ -114,19 +163,22 @@ Cheats     Infinite health, infinite hearts (always 99), infinite lives
            next stage you enter)
 Language   English patch or Japanese original (each is its own disc; see below)
 
-Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini.
+Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini (on Linux in
+~/.local/share/RondoRecomp/RondoRecomp/settings.ini).
 
-Your own icon
--------------
+Your own icon (Windows)
+-----------------------
 RondoRecomp includes no game artwork. To give rondo.exe an icon, put an image named
 icon.png (up to 256 x 256 pixels) or icon.ico next to "RondoRecomp Setup.exe" and run
 Setup (or Rebuild); it is built into rondo.exe and shows on its window and taskbar button.
+On Linux and the Steam Deck, Steam's Properties for the game set its pictures instead.
 
 Rewind plays the game backwards while held (faster after 3 seconds) and continues from
 where you let go; up to 30 minutes are kept. Rewinding never changes your saved game.
 
 In-game saves are kept in %APPDATA%\RondoRecomp\RondoRecomp\bram.bin (bram-ja.bin for
-Japanese), save states in %APPDATA%\RondoRecomp\RondoRecomp\states\.
+Japanese), save states in %APPDATA%\RondoRecomp\RondoRecomp\states\ (on Linux the same
+files in ~/.local/share/RondoRecomp/RondoRecomp/).
 To keep a separate set (options, saves, states), set the environment variable
 RONDORECOMP_PROFILE to a folder before starting Setup or rondo.exe; your usual ones are
 left alone.
@@ -149,8 +201,10 @@ natively in the last session.
 
 Command line
 ------------
-rondo_setup.exe <disc.zip | disc.cue>     the same steps without a window
+rondo_setup.exe <disc.zip | disc.cue | folder>
+                                          the same steps without a window
 rondo_setup.exe --rebuild                 recompile again with misses.txt
+(./rondo_setup on Linux)
 
 Status
 ------

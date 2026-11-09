@@ -2,10 +2,10 @@
 # Assembles the release folder dist/RondoRecomp and dist/RondoRecomp-<version>-windows-x64.zip.
 # The release contains no game material: players provide their own disc image to Setup.
 #
-# usage: tools/package_release.sh [version]
+# usage: tools/package_release.sh [version]   (default: RONDO_VERSION, tools/frontend/programs.h)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VER=${1:-0.13}
+VER=${1:-$(sed -n 's/^#define RONDO_VERSION "\(.*\)"/\1/p' tools/frontend/programs.h)}
 B=build
 LIC=/c/msys64/ucrt64/share/licenses
 
@@ -13,7 +13,7 @@ LIC=/c/msys64/ucrt64/share/licenses
 cmake --build $B
 
 OUT=dist/RondoRecomp
-rm -rf dist
+rm -rf "$OUT" dist/RondoRecomp-*-windows-x64.zip   # (the Linux release, also in dist/, is kept)
 mkdir -p "$OUT"
 cp "$B/RondoRecomp Setup.exe" "$B/rondo_setup.exe" "$B/SDL3.dll" "$B/libiconv-2.dll" "$OUT/"
 cp -r "$B/sdk" "$OUT/sdk"
@@ -40,13 +40,15 @@ cp docs/PLAYER_README.txt "$OUT/README.txt"
     echo "Shinonome Gothic 12 and 16 dot bitmap fonts (sdk/src/runtime/pce/kanji_font.c, the"
     echo "Japanese text of the original disc): public domain, The Electronic Font Open Laboratory"
     echo "    http://openlab.jp/efont/shinonome/"
+    echo "rcheevos 12.5.0 (sdk/src/rcheevos, built into rondo.exe for RetroAchievements): MIT,"
+    echo "    RetroAchievements - https://github.com/RetroAchievements/rcheevos"
     echo
     echo "The license texts follow."
-    for f in "$LIC/SDL3/LICENSE.txt" "$LIC/zlib/LICENSE" "$LIC/libiconv/COPYING.LIB" tools/fonts/OFL-*.txt; do
+    for f in "$LIC/SDL3/LICENSE.txt" "$LIC/zlib/LICENSE" "$LIC/libiconv/COPYING.LIB" tools/fonts/OFL-*.txt third_party/rcheevos/LICENSE; do
         [ -f "$f" ] || continue
         echo
         echo "---------------------------------------------------------------------------"
-        echo "$f" | sed 's|.*/licenses/||; s|tools/fonts/||'
+        echo "$f" | sed 's|.*/licenses/||; s|tools/fonts/||; s|third_party/||'
         echo "---------------------------------------------------------------------------"
         cat "$f"
     done

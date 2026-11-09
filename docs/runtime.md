@@ -290,7 +290,42 @@ Profile: settings, saves, states and the remembered disc live in the pref folder
 (`%APPDATA%\RondoRecomp\RondoRecomp`), or in the folder named by the `RONDORECOMP_PROFILE`
 environment variable (`locate_profile_dir`), which Setup and rondo.exe started from each
 other inherit: a whole separate player, e.g. to go through the first run again.
-The build copies `SDL3.dll` and `libiconv-2.dll` next to the executable.
+The build copies `SDL3.dll` and `libiconv-2.dll` next to the executable (on Linux
+`libSDL3.so.0`, found through the programs' RUNPATH, `$ORIGIN`).
+
+RetroAchievements (`achievements.c`, `http.c`; game 4855): RetroAchievements' client library,
+rcheevos 12.5.0 (`third_party/rcheevos`, MIT; built with `RC_NO_THREADS` and only the CD hashing,
+`tools/rcheevos_sources.cmake`), runs the achievements, leaderboards and rich presence.
+- The disc is identified by RetroAchievements' PC Engine CD hash: MD5 of the 22-byte title at
+  sector 1 + 106 of the first data track, then the boot program's sectors. The library's own
+  code hashes it, reading through the runtime's disc reader (`Disc`, every image format the game
+  takes). The English patch keeps the original's boot sector, so both discs hash to
+  `dc5a0e432c9e8a9ab9f514b729b574f3` = game 4855.
+- Memory as RetroAchievements maps a PC Engine CD:
+  - `$000000` work RAM
+  - `$002000` CD RAM
+  - `$012000` Super System Card RAM
+  - `$042000` backup RAM (2 KiB)
+
+  These are `Pce.wram`, `cdram`, `superram` and `bram` in that order.
+- The library is checked after every emulated frame, story scenes run fast included, but not
+  while rewinding.
+- Server requests run on a thread each, with WinHTTP on Windows and on Linux the system's
+  libcurl, loaded at run time (`libcurl.so.4`, then the GnuTLS build). Their answers are
+  handed to the library on the main thread (`http_poll`), so it needs no locking. The
+  User-Agent is `RondoRecomp/<version> (<system>) rcheevos/<version>`.
+- The account: a password login answers with a token, and only the token is kept
+  (`settings.ini` `ra_user`, `ra_token`). Later starts log in with it, and a rejected token is
+  dropped.
+- Save states keep the achievements' progress (hit counts) in `slotN.state.ra` next to the
+  state. A state without one resets them.
+- Hardcore mode turns off state loading, rewind, the cheats and the run; the library asks for
+  a restart when it is switched on (`RC_CLIENT_EVENT_RESET`).
+- `rondo --test-achievements` hashes each installed disc, asks the server which game it is (no
+  login needed), and exits 0 when both are game 4855.
+- The features test registers an achievement of its own on the game's state (`$30` = 05, `$31`
+  = 01) through the same memory map. It must fire at the first frame of play after the
+  opening cinematic (16105), in that state.
 
 ### Headless runner
 

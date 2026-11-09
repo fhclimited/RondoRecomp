@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "achievements.h"
 #include "capture_script.h"
 #include "game.h"
 #include "input.h"
@@ -30,6 +31,7 @@
 #include "theme.h"
 #include "video.h"
 #include "prompt.h"
+#include "programs.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
 #define AUDIO_RATE 44100
@@ -187,8 +189,12 @@ static bool disc_for(int lang, const Settings *set, const char *main_disc, char 
 
 /* (Re)start the machine with a disc; the session's language is the disc's. The disc is
  * checked first, so a failure leaves the running game alone. */
-static bool start_game(Session *ss, const char *disc, char *err, int err_len)
+static bool start_game(Session *ss, const char *disc_arg, char *err, int err_len)
 {
+    /* a copy: callers pass ss->disc itself (a restart), which is rewritten below; copying a
+     * string onto itself is undefined (glibc's snprintf empties it) */
+    char disc[1024];
+    snprintf(disc, sizeof disc, "%s", disc_arg);
     if (discid_identify(disc, NULL) == DISC_INVALID) {
         snprintf(err, (size_t)err_len, "%s could not be read as a PC Engine CD image", disc);
         return false;
@@ -210,6 +216,7 @@ static bool start_game(Session *ss, const char *disc, char *err, int err_len)
     pce.bram_dirty = false;
     if (have_rewind) rewind_reset(&rw, &pce);
     game_watch_reset(&gw, &pce);
+    ach_game_started(disc);
     return true;
 }
 
@@ -266,9 +273,9 @@ static bool open_setup(char *status, size_t n)
 {
     const char *base = SDL_GetBasePath();
     char exe[1100];
-    snprintf(exe, sizeof exe, "%sRondoRecomp Setup.exe", base ? base : "");
+    snprintf(exe, sizeof exe, "%s" SETUP_PROGRAM, base ? base : "");
     if (!SDL_GetPathInfo(exe, NULL)) {
-        snprintf(status, n, "RondoRecomp Setup.exe is not next to rondo.exe");
+        snprintf(status, n, SETUP_PROGRAM " is not next to " GAME_PROGRAM);
         return false;
     }
     const char *args[] = {exe, NULL};
@@ -361,13 +368,14 @@ int main(int argc, char **argv)
     /* --autotest: save/load a state and rewind without user input, then quit.
      * --autotest-features DIR: play the capture script with cheats and automatic cinematic
      * skipping, take screenshots of the video modes and menu into DIR, then quit. */
-    bool autotest = false, play_now = false, autotest_start = false;
+    bool autotest = false, play_now = false, autotest_start = false, test_ach = false;
     const char *features_dir = NULL, *disc_arg = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--autotest")) autotest = true;
         else if (!strcmp(argv[i], "--play")) play_now = true;
         else if (!strcmp(argv[i], "--autotest-features") && i + 1 < argc) features_dir = argv[++i];
         else if (!strcmp(argv[i], "--autotest-start")) autotest_start = true;
+        else if (!strcmp(argv[i], "--test-achievements")) test_ach = true;   /* the discs' hashes, asked of the server */
         else disc_arg = argv[i];
     }
     char autotest_log[2048] = "";
@@ -376,7 +384,7 @@ int main(int argc, char **argv)
     locate_profile_dir(pref_dir, sizeof pref_dir);
     char settings_path[1100], states_dir[1100];
     snprintf(settings_path, sizeof settings_path, "%ssettings.ini", pref_dir);
-    if (autotest || features_dir || autotest_start) {
+    if (autotest || features_dir || autotest_start || test_ach) {
         /* test runs keep their state files apart from the player's */
         no_save_files = true;
         size_t l = strlen(pref_dir);
@@ -387,7 +395,7 @@ int main(int argc, char **argv)
     SDL_CreateDirectory(states_dir);
     Settings set;
     settings_load(&set, settings_path);
-    bool test_mode = autotest || features_dir || autotest_start;
+    bool test_mode = autotest || features_dir || autotest_start || test_ach;
     if (test_mode) {   /* fixed options; nothing is saved */
         settings_default(&set);
         if (features_dir) {
@@ -414,6 +422,33 @@ int main(int argc, char **argv)
     if (!choose_disc(win, ren, disc_arg, disc_path, sizeof disc_path)) {
         SDL_Quit();
         return 0;
+    }
+    ach_init(&pce, &set);
+    /* features test: an achievement of its own on the game's state (work RAM $30 = 05 playing,
+     * $31 = 01), read as RetroAchievements reads the console's memory */
+    if (features_dir) ach_test_trigger("0xH0030=5_0xH0031=1");
+    if (test_ach) {
+        /* --test-achievements: each installed disc's RetroAchievements hash and the game the
+         * server knows it as (no login needed), into rondo.log; exit code 0 if all are game 4855 */
+        int bad = 0;
+        for (int l = 0; l < LANG_COUNT; l++) {
+            char disc[1024], hash[33] = "", why[200] = "";
+            if (!disc_for(l, &set, disc_path, disc, sizeof disc)) continue;
+            int id = ach_test_identify(disc, hash, why, sizeof why);
+            TLOG("achievements: %s disc: hash %s, RetroAchievements game %d%s%s\n", l == LANG_JA ? "Japanese" : "English",
+                 hash[0] ? hash : "(none)", id, id < 0 ? " - " : id == 4855 ? " (Castlevania: Rondo of Blood)" : " - NOT 4855",
+                 id < 0 ? why : "");
+            if (id != 4855) bad++;
+        }
+        const char *base = SDL_GetBasePath();
+        char log_path[1024];
+        snprintf(log_path, sizeof log_path, "%srondo.log", base ? base : "");
+        FILE *lf = fopen(log_path, "w");
+        if (lf) { fputs(autotest_log, lf); fclose(lf); }
+        fputs(autotest_log, stdout);
+        ach_shutdown();
+        SDL_Quit();
+        return bad ? 1 : 0;
     }
     have_rewind = rewind_init(&rw, 256u << 20, (int)(FRAME_RATE * 60 * 30));   /* ~1 KB a frame, up to 30 min */
     Session ss = {0};
@@ -474,6 +509,8 @@ int main(int argc, char **argv)
     long t_cine_start = -1, t_cine_end = -1;
     Uint64 t_cine_ns = 0;
     int t_min_health = 0x100;
+    long t_ach_frame = -1;
+    bool t_ach_state = false;
 
     while (running) {
         if (autotest_start) {          /* phases wait for the skips to finish, at any speed */
@@ -551,7 +588,9 @@ int main(int argc, char **argv)
             input_device_event(&in, &ev);
             if (menu.open) {
                 MenuResult r = MENU_NOTHING;
-                if (menu_capturing(&menu)) {
+                if (menu_editing(&menu)) {
+                    r = menu_text(&menu, &set, &ev);           /* typing into a text field */
+                } else if (menu_capturing(&menu)) {
                     r = menu_capture(&menu, &set, &in, &ev);   /* the next button or key is the control */
                 } else if (ev.type == SDL_EVENT_MOUSE_MOTION || ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                     SDL_Event e = ev;
@@ -577,10 +616,16 @@ int main(int argc, char **argv)
                     char path[1200];
                     state_path(path, sizeof path, &ss, set.slot);
                     if (r == MENU_SAVE_STATE) {
-                        if (pce_state_save(&pce, path, ss.disc_id, err, sizeof err))
+                        if (pce_state_save(&pce, path, ss.disc_id, err, sizeof err)) {
+                            ach_save_progress(path);
                             snprintf(menu.status, sizeof menu.status, "State %d saved", set.slot);
-                        else snprintf(menu.status, sizeof menu.status, "Save failed: %.60s", err);
+                        } else {
+                            snprintf(menu.status, sizeof menu.status, "Save failed: %.60s", err);
+                        }
+                    } else if (ach_hardcore()) {
+                        snprintf(menu.status, sizeof menu.status, "Hardcore mode: loading a state is off.");
                     } else if (pce_state_load(&pce, path, ss.disc_id, err, sizeof err)) {
+                        ach_load_progress(path);
                         if (have_rewind) rewind_reset(&rw, &pce);
                         game_watch_reset(&gw, &pce);
                         pce.bram_dirty = false;
@@ -641,6 +686,32 @@ int main(int argc, char **argv)
                 case MENU_SETTINGS_CHANGED:
                     if (!test_mode) settings_save(&set, settings_path);
                     break;
+                case MENU_ACH_CHANGED:
+                    ach_configure();
+                    if (!test_mode) settings_save(&set, settings_path);
+                    break;
+                case MENU_ACH_LOGIN:
+                    if (!set.ra_user[0] || !menu.password[0]) {
+                        snprintf(menu.status, sizeof menu.status, "Enter your user name and password first.");
+                    } else {
+                        ach_login(set.ra_user, menu.password);
+                        SDL_memset(menu.password, 0, sizeof menu.password);   /* used once, never kept */
+                        snprintf(menu.status, sizeof menu.status, "Logging in as %s...", set.ra_user);
+                        if (!test_mode) settings_save(&set, settings_path);
+                    }
+                    break;
+                case MENU_ACH_LOGOUT:
+                    ach_logout();
+                    snprintf(menu.status, sizeof menu.status, "Logged out of RetroAchievements.");
+                    if (!test_mode) settings_save(&set, settings_path);
+                    break;
+                case MENU_TEXT_START:
+                    SDL_StartTextInput(win);
+                    break;
+                case MENU_TEXT_END:
+                    SDL_StopTextInput(win);
+                    if (!test_mode) settings_save(&set, settings_path);
+                    break;
                 default:
                     break;
                 }
@@ -668,9 +739,16 @@ int main(int argc, char **argv)
                     char path[1200];
                     state_path(path, sizeof path, &ss, set.slot);
                     if (save) {
-                        if (pce_state_save(&pce, path, ss.disc_id, err, sizeof err)) show_osd("State %d saved", set.slot);
-                        else show_osd("Save failed: %s", err);
+                        if (pce_state_save(&pce, path, ss.disc_id, err, sizeof err)) {
+                            ach_save_progress(path);
+                            show_osd("State %d saved", set.slot);
+                        } else {
+                            show_osd("Save failed: %s", err);
+                        }
+                    } else if (ach_hardcore()) {
+                        show_osd("Hardcore mode: loading a state is off");
                     } else if (pce_state_load(&pce, path, ss.disc_id, err, sizeof err)) {
+                        ach_load_progress(path);
                         show_osd("State %d loaded", set.slot);
                         if (have_rewind) rewind_reset(&rw, &pce);
                         game_watch_reset(&gw, &pce);
@@ -693,14 +771,15 @@ int main(int argc, char **argv)
         if (menu.open) {
             if (menu_update(&menu, &set) == MENU_SETTINGS_CHANGED && !test_mode)   /* a control's count ended */
                 settings_save(&set, settings_path);
-            Nav nav = test_mode || menu_capturing(&menu) ? NAV_NONE : input_nav_stick(&in);
+            Nav nav = test_mode || menu_capturing(&menu) || menu_editing(&menu) ? NAV_NONE : input_nav_stick(&in);
             if (nav != NAV_NONE) {
                 MenuResult r = menu_nav(&menu, &set, nav);    /* the stick only steps and changes values */
                 if (r == MENU_LANGUAGE) {
                     switch_language(&ss, &set, disc_path, true, win, ren, menu.status, sizeof menu.status);
                     if (menu_on_start_screen(&menu)) start_screen_info(&menu, &ss, &set, disc_path);
                 }
-                if (r == MENU_SETTINGS_CHANGED || r == MENU_VIDEO_CHANGED || r == MENU_LANGUAGE) {
+                if (r == MENU_ACH_CHANGED) ach_configure();
+                if (r == MENU_SETTINGS_CHANGED || r == MENU_VIDEO_CHANGED || r == MENU_LANGUAGE || r == MENU_ACH_CHANGED) {
                     if (r == MENU_VIDEO_CHANGED) {
                         SDL_SetWindowFullscreen(win, set.fullscreen);
                         set_vsync(ren, set.vsync && !test_mode);
@@ -710,11 +789,20 @@ int main(int argc, char **argv)
             }
         }
 
+        if (ach_update() && !test_mode) settings_save(&set, settings_path);   /* a login's token */
+        if (ach_take_reset()) {               /* hardcore switched on: from power-on */
+            if (start_game(&ss, ss.disc, err, sizeof err) && !menu_on_start_screen(&menu)) show_osd("Hardcore mode: the game restarted");
+            skipping = was_rewinding = skip_to_title = false;
+        }
+        if (menu.open) ach_status(menu.ach[0], sizeof menu.ach[0], menu.ach[1], sizeof menu.ach[1]);
+
         prompt.pad = input_pad_last(&in);
         prompt.line = prompt.pad ? (set.bind_pad[ACT_PAUSE] == SDL_GAMEPAD_BUTTON_START ? "PUSH  START  BUTTON!"
                                                                                        : "PUSH  PAUSE  BUTTON!")
                                  : (set.bind_key[ACT_PAUSE] == SDL_SCANCODE_RETURN ? "PUSH  ENTER  KEY!" : "PUSH  PAUSE  KEY!");
         GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives, set.maria_unlocked, set.play_maria};
+        bool hardcore = ach_hardcore();
+        if (hardcore) memset(&cheats, 0, sizeof cheats);   /* RetroAchievements' hardcore mode: none */
         bool rewinding = false, ran_frame = false;
         if (menu_on_start_screen(&menu)) {
             /* the start screen: the game waits for Play (nothing runs, nothing sounds) */
@@ -740,7 +828,7 @@ int main(int argc, char **argv)
                 skip_intro = !game_in_cinematic(&pce);
                 if (features_dir) { t_cine_start = (long)pce.frame; t_cine_ns = SDL_GetTicksNS(); }
             }
-            rewinding = set.rewind && have_rewind && !skipping && !test_mode && input_rewind_held(&in);
+            rewinding = set.rewind && have_rewind && !skipping && !test_mode && !hardcore && input_rewind_held(&in);
             if (autotest) {
                 uint64_t f = pce.frame;
                 char path[1200];
@@ -777,6 +865,7 @@ int main(int argc, char **argv)
                     audio_frac -= skip_n;
                     pce_audio_render(&pce, samples, skip_n);
                     game_apply_cheats(&pce, &cheats, &gw);
+                    ach_frame();
                     flush_bram(&ss);
                 }
                 ran_frame = true;
@@ -827,13 +916,19 @@ int main(int argc, char **argv)
                 pce.pad = pad;
                 run_frame();
                 game_apply_cheats(&pce, &cheats, &gw);
-                game_apply_run(&pce, !test_mode && input_run_held(&in), &gw);
+                game_apply_run(&pce, !test_mode && !hardcore && input_run_held(&in), &gw);
+                ach_frame();
                 ran_frame = true;
                 if (have_rewind && set.rewind) rewind_record(&rw, &pce, pce.pad);
                 flush_bram(&ss);
                 if (features_dir && game_playing(&pce) && pce.frame > 16200 && pce.wram[RONDO_HEALTH] < t_min_health)
                     t_min_health = pce.wram[RONDO_HEALTH];
             }
+        }
+
+        if (features_dir && ran_frame && t_ach_frame < 0 && ach_test_triggered()) {
+            t_ach_frame = (long)pce.frame;
+            t_ach_state = pce.wram[RONDO_STATE] == 0x05 && pce.wram[RONDO_SUB] == 0x01;
         }
 
         /* audio: one frame's worth, kept within ~100 ms of queued data (silent while skipping,
@@ -901,6 +996,23 @@ int main(int argc, char **argv)
             draw_banner(ren, "START: skip", true);
             snprintf(path, sizeof path, "%s/notices.bmp", features_dir);
             screenshot(ren, path);
+            {   /* the RetroAchievements page (not logged in), then an unlock pop-up */
+                Menu am = {0};
+                menu_open(&am);
+                am.opened_ms = 0;
+                for (int d = 0; d < 8; d++) menu_nav(&am, &set, NAV_DOWN);
+                menu_nav(&am, &set, NAV_OK);
+                ach_status(am.ach[0], sizeof am.ach[0], am.ach[1], sizeof am.ach[1]);
+                video_draw(&video, &set);
+                menu_draw(&am, &set, ren);
+                snprintf(path, sizeof path, "%s/menu_achievements.bmp", features_dir);
+                screenshot(ren, path);
+                video_draw(&video, &set);
+                ach_test_popup();
+                ach_draw(ren);
+                snprintf(path, sizeof path, "%s/achievement_popup.bmp", features_dir);
+                screenshot(ren, path);
+            }
             {   /* the start screen: a screenshot; START plays, Back stays, an option page returns
                  * to it, and the mouse finds each item in order */
                 Menu sm = {0};
@@ -1051,11 +1163,15 @@ int main(int argc, char **argv)
             draw_banner(ren, skip_line, true);
         }
         if (menu.open) menu_draw(&menu, &set, ren);
+        ach_draw(ren);                        /* unlocks, leaderboards: over everything */
         SDL_RenderPresent(ren);
 
         if (features_dir && pce.frame >= 20100) {
             TLOG("features: lowest health while playing (cheat on): %d of 92; hearts %02X; lives %02X\n",
                  t_min_health, pce.wram[RONDO_HEARTS], pce.wram[RONDO_LIVES]);
+            if (t_ach_frame < 0) TLOG("features: RetroAchievements: the test achievement ($30 = 05, $31 = 01) NEVER TRIGGERED\n");
+            else TLOG("features: RetroAchievements: the test achievement ($30 = 05, $31 = 01) triggered at frame %ld, %s\n",
+                      t_ach_frame, t_ach_state ? "the game's state as it says" : "BUT THE STATE IS NOT THAT");
             /* the Language option, without asking: the other language's disc if installed */
             int from = ss.language;
             set.language = from == LANG_JA ? LANG_EN : LANG_JA;
@@ -1106,6 +1222,7 @@ int main(int argc, char **argv)
             }
         }
     }
+    ach_shutdown();
     input_close(&in);
     video_free(&video);
     if (audio) SDL_DestroyAudioStream(audio);

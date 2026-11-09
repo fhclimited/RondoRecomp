@@ -22,6 +22,11 @@ typedef enum {
     MENU_START_SCREEN,     /* in-game menu: back to the start screen */
     MENU_SETUP,            /* start screen: open RondoRecomp Setup (add a disc, rebuild) */
     MENU_RESET_CONTROLS,   /* Controls page: every control back to its default (handled here) */
+    MENU_ACH_CHANGED,      /* RetroAchievements on / off, hardcore: apply and save */
+    MENU_ACH_LOGIN,        /* log in with the user name (settings) and menu.password */
+    MENU_ACH_LOGOUT,
+    MENU_TEXT_START,       /* a text field was chosen: start text input (the Steam Deck's keyboard opens) */
+    MENU_TEXT_END,         /* typing ended: stop text input, save the settings */
 } MenuResult;
 
 typedef struct Menu {
@@ -38,6 +43,9 @@ typedef struct Menu {
     int last[8], n_last;   /* the last ones down together (for buttons let go before the end) */
     int held_key, last_key;    /* a key held now / the last one pressed, 0 none */
     bool key_after;        /* the last press was a key */
+    int editing;           /* 1 + the text field being typed into, 0 none */
+    char password[128];    /* RetroAchievements: typed for Log in, then forgotten (never saved) */
+    char ach[2][160];      /* RetroAchievements page: its status lines (the account, the game) */
 } Menu;
 
 void menu_open(Menu *m);
@@ -54,6 +62,11 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren);
 bool menu_capturing(const Menu *m);
 MenuResult menu_capture(Menu *m, Settings *s, const Input *in, const SDL_Event *ev);
 MenuResult menu_update(Menu *m, Settings *s);
+/* Text fields (RetroAchievements' user name and password): while one is being typed into,
+ * every event goes to menu_text; Enter, Esc, a controller's A / B / Start or a click ends it
+ * (MENU_TEXT_END). */
+bool menu_editing(const Menu *m);
+MenuResult menu_text(Menu *m, Settings *s, const SDL_Event *ev);
 
 /* Mouse, in render coordinates: the item under (x, y) or -1; moving over an item selects
  * it; clicking chooses it (a choice steps to its next value). */

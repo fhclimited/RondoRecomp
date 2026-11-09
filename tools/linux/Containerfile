@@ -1,0 +1,14 @@
+# Build environment for the Linux release (tools/package_release_linux.sh): Ubuntu 22.04, so
+# what it builds runs on glibc 2.35 or newer (SteamOS 3 on the Steam Deck, Ubuntu 22.04,
+# Debian 12, Fedora 36, Arch, ...).
+FROM docker.io/library/ubuntu:22.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl xz-utils file make cmake ninja-build pkg-config gcc libc6-dev zlib1g-dev \
+        # SDL3's video / audio / input backends (it loads them at run time; the headers decide
+        # which it can use): X11, Wayland, PipeWire, PulseAudio, ALSA, D-Bus (the file dialog
+        # through the desktop portal), udev (controllers)
+        libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxtst-dev \
+        libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl-dev libgl-dev libdrm-dev libgbm-dev \
+        libpulse-dev libasound2-dev libpipewire-0.3-dev libdbus-1-dev libudev-dev \
+    && rm -rf /var/lib/apt/lists/*
