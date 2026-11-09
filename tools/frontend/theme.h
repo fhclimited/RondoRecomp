@@ -1,8 +1,10 @@
-/* The look of the frontend's own screens (the start screen, the menu, notices): gothic, in
- * Castlevania's colours, laid out after the Metroid: Other M port's menus. Panels are dark
- * burgundy frames with a pointed-arch top, double gold borders, pinnacles and a cross finial;
- * dividers carry diamonds and a cross; the emblem is a rose window; the start screen is a
- * moonlit castle skyline with bats. Text is drawn with stb_truetype in fonts built into
+/* The look of the frontend's own screens (the start screen, the menu, notices): gothic, by
+ * candlelight and moonlight, laid out after the Metroid: Other M port's menus. Panels are dark
+ * umber frames with a pointed-arch top that lets in pale moonlight, double gold borders,
+ * pinnacles and a cross finial; dividers carry diamonds and a cross; the emblem is a rose
+ * window lit from behind; the start screen is a town at night, its windows and lanterns lit
+ * by candles, a castle on a hill behind, under a pale moon whose beams slant down onto it.
+ * Red is kept to small rubies. Text is drawn with stb_truetype in fonts built into
  * rondo.exe (ui_fonts.c, SIL OFL): Cinzel for menu text, Cinzel Decorative for capitals,
  * UnifrakturMaguntia (blackletter) for titles; Windows' fonts, then SDL's debug font, if
  * one cannot be read. Everything draws in render-output pixels. */
@@ -14,12 +16,15 @@
 enum { TH_FONT_UI, TH_FONT_TITLE, TH_FONT_CAPS, TH_FONT_COUNT };
 
 #define TH_GOLD ((SDL_Color){230, 184, 92, 255})
-#define TH_CRIMSON ((SDL_Color){222, 44, 58, 255})
+#define TH_RUBY ((SDL_Color){190, 38, 52, 255})       /* small jewels only */
+#define TH_CANDLE ((SDL_Color){236, 156, 66, 255})    /* candlelight: the chosen row, warm glows */
+#define TH_EMBER ((SDL_Color){104, 46, 12, 255})      /* the halo behind lit titles */
+#define TH_MOON ((SDL_Color){200, 214, 242, 255})     /* pale moonlight */
 #define TH_TEXT ((SDL_Color){246, 236, 218, 255})
 #define TH_TEXT_DIM ((SDL_Color){184, 162, 140, 255})
 #define TH_ACTION ((SDL_Color){255, 214, 150, 255})
-#define TH_PANEL_TOP ((SDL_Color){42, 11, 20, 240})
-#define TH_PANEL_BOTTOM ((SDL_Color){12, 3, 8, 244})
+#define TH_PANEL_TOP ((SDL_Color){34, 28, 27, 244})
+#define TH_PANEL_BOTTOM ((SDL_Color){10, 9, 11, 248})
 #define TH_NONE ((SDL_Color){0, 0, 0, 0})
 
 /* `c` with its alpha replaced (0-255) or scaled (0-1). */
@@ -67,8 +72,8 @@ void th_cross(SDL_Renderer *ren, float cx, float cy, float r, SDL_Color top, SDL
 /* A small filled arrowhead pointing right (or left), `size` pixels tall. */
 void th_arrow(SDL_Renderer *ren, float x, float y, float size, bool right, SDL_Color c);
 /* A gothic panel: x0..x1, its pointed-arch top `rise` pixels high at y0 (the apex), its
- * bottom at y1; dark burgundy, a gold border with an inner line, pinnacles at the arch's
- * feet, a cross on the apex. `u` is the layout unit, `alpha` 0-1. */
+ * bottom at y1; dark umber, moonlight through the arch, a gold border with an inner line,
+ * pinnacles at the arch's feet, a cross on the apex. `u` is the layout unit, `alpha` 0-1. */
 void th_frame(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float rise, float u, float alpha);
 /* A divider from x0 to x1 at y: gold lines either side of diamonds and a small cross. */
 void th_divider(SDL_Renderer *ren, float x0, float x1, float y, float u, float alpha);
@@ -76,10 +81,12 @@ void th_divider(SDL_Renderer *ren, float x0, float x1, float y, float u, float a
 void th_plaque(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float u, float alpha);
 
 /* The emblem: a rose window, `r` pixels across to its rim, with a gold cross in stained
- * glass; `t` (seconds) makes the glass glow; `alpha` 0-1. */
+ * glass lit by a candle behind it; `t` (seconds) makes the light flicker; `alpha` 0-1. */
 void th_emblem(SDL_Renderer *ren, float cx, float cy, float r, float t, float alpha);
-/* The start screen's backdrop over the whole w x h output: a night sky, a blood moon, the
- * castle's skyline with lit windows, mist, bats crossing (t: seconds). */
+/* The start screen's backdrop over the whole w x h output: a deep blue night, a pale moon
+ * with beams slanting down, thin clouds and bats; a castle on a hill and the town's rear rows
+ * in a cool mist; the town's warm glow; the near row of houses, a church and street lanterns,
+ * windows lit by flickering candles (t: seconds). */
 void th_backdrop(SDL_Renderer *ren, int w, int h, float t);
 
 /* Layout unit: 1 at 960 x 540, scaled with the output (the smaller of its width / 16 and

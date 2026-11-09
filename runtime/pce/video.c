@@ -188,47 +188,42 @@ void vdc_line_start(Vdc *d, int line)
         if (d->display_end > PCE_LINES_PER_FRAME) d->display_end = PCE_LINES_PER_FRAME;
         d->first_line = true;
         int w = ((d->reg[R_HDR] & 0x7F) + 1) * 8;
-        int e = d->wide < 0 ? 0 : d->wide > VDC_WIDE_MAX ? VDC_WIDE_MAX : d->wide;
-        d->fb_wide = w == 256 ? e : 0;
-        w += 2 * d->fb_wide;
         d->fb_w = w > PCE_FB_MAX_W ? PCE_FB_MAX_W : w;
         int h = d->display_end - d->display_start;
         d->fb_h = h > PCE_FB_MAX_H ? PCE_FB_MAX_H : (h < 0 ? 0 : h);
     }
 
-    if (line >= d->display_start && line < d->display_end) {
-        int rc = line - d->display_start + 0x40;
-        if ((d->reg[R_RCR] & 0x3FF) == rc)
-            raise(d, VDC_ST_RR, (d->reg[R_CR] & 0x04) != 0);
-    }
+    /* The raster counter is $40 on the picture's first line and counts every line until the
+     * next picture starts, through vertical blank: a compare can match below the picture.
+     * (Rondo of Blood sets $40 + the picture's height, the first line after it, to put Richter's
+     * palette back after drawing his reflection in the water blue.) */
+    int rc = (line >= d->display_start ? line - d->display_start : line + PCE_LINES_PER_FRAME - d->display_start) + 0x40;
+    if ((d->reg[R_RCR] & 0x3FF) == rc)
+        raise(d, VDC_ST_RR, (d->reg[R_CR] & 0x04) != 0);
+}
 
-    if (line == d->display_end) {
-        uint16_t dcr = d->reg[R_DCR];
-        if (d->satb_pending || (dcr & 0x10)) {
-            uint16_t src = d->reg[R_DVSSR];
-            for (int i = 0; i < 256; i++) d->satb[i] = d->vram[(src + i) & 0x7FFF];
-            d->satb_pending = false;
-            raise(d, VDC_ST_DS, (dcr & 0x01) != 0);
-        }
-        raise(d, VDC_ST_VD, (d->reg[R_CR] & 0x08) != 0);
+void vdc_vblank(Vdc *d)
+{
+    /* After the line's raster compare, as on the console: a game reads the status once per
+     * interrupt and handles one cause, so the two must come one after the other. */
+    uint16_t dcr = d->reg[R_DCR];
+    if (d->satb_pending || (dcr & 0x10)) {
+        uint16_t src = d->reg[R_DVSSR];
+        for (int i = 0; i < 256; i++) d->satb[i] = d->vram[(src + i) & 0x7FFF];
+        d->satb_pending = false;
+        raise(d, VDC_ST_DS, (dcr & 0x01) != 0);
     }
+    raise(d, VDC_ST_VD, (d->reg[R_CR] & 0x08) != 0);
 }
 
 /* ---- rendering ------------------------------------------------------------- */
 
 static uint16_t row_scroll[PCE_FB_MAX_H];
-static uint8_t row_bg_blank[PCE_FB_MAX_H], row_bg_edge[PCE_FB_MAX_H];
-static const uint8_t *row_clip;
-
 const uint16_t *vdc_row_scroll(void) { return row_scroll; }
-const uint8_t *vdc_row_bg_blank(void) { return row_bg_blank; }
-const uint8_t *vdc_row_bg_edge(void) { return row_bg_edge; }
-void vdc_set_row_clip(const uint8_t *rows) { row_clip = rows; }
 static uint64_t sprite_hide;
 void vdc_set_sprite_hide(uint64_t mask) { sprite_hide = mask; }
 
-/* x0: screen x of out[0] (negative in widescreen) */
-static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
+static void render_bg(Vdc *d, int y, int w, uint16_t *out)
 {
     static const int map_w[4] = {32, 64, 128, 128};
     uint16_t mwr = d->reg[R_MWR];
@@ -236,7 +231,7 @@ static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
     int mh = (mwr & 0x40) ? 64 : 32;
     int py = y & (mh * 8 - 1);
     int row = py & 7;
-    int sx = (d->reg[R_BXR] & 0x3FF) + x0;
+    int sx = d->reg[R_BXR] & 0x3FF;
     const uint16_t *map = &d->vram[(py >> 3) * mw];
     for (int x = 0; x < w; x++) {
         int px = (sx + x) & (mw * 8 - 1);
@@ -250,9 +245,8 @@ static void render_bg(Vdc *d, int y, int x0, int w, uint16_t *out)
     }
 }
 
-/* out: 0 = none, else 0x100 | palette<<4 | color, bit 15 = in front of BG.
- * x0: screen x of out[0] (negative in widescreen). */
-static void render_sprites(Vdc *d, int y, int x0, int w, uint16_t *out)
+/* out: 0 = none, else 0x100 | palette<<4 | color, bit 15 = in front of BG. */
+static void render_sprites(Vdc *d, int y, int w, uint16_t *out)
 {
     int count = 0;
     bool spr0_drawn[PCE_FB_MAX_W];
@@ -264,18 +258,12 @@ static void render_sprites(Vdc *d, int y, int x0, int w, uint16_t *out)
         int cgy = (attr >> 12) & 3;
         int h = cgy == 0 ? 16 : cgy == 1 ? 32 : 64;
         if (y < sy || y >= sy + h) continue;
-        if (++count > 16) {
+        if (++count > 16) {   /* the hardware shows 16 sprites per line */
             raise(d, VDC_ST_OR, (d->reg[R_CR] & 0x02) != 0);
-            /* the hardware shows 16 sprites per line; widescreen shows more of the level
-             * and drops the limit rather than lose sprites at the new edges */
-            if (!x0) break;
+            break;
         }
         int sw = (attr & 0x0100) ? 32 : 16;
         int sx = (s[1] & 0x3FF) - 32;
-        /* 10-bit X: in widescreen, values past the right of any real display are
-         * sprites to the left of the picture */
-        if (x0 && sx >= 1024 - 32 + x0 - 32) sx -= 1024;
-        sx -= x0;
         int pattern = (s[2] >> 1) & 0x3FF;
         if (sw == 32) pattern &= ~1;
         if (h == 32) pattern &= ~2;
@@ -324,16 +312,9 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
     memset(bg, 0, sizeof bg);
     memset(sp, 0, sizeof sp);
     uint16_t cr = d->reg[R_CR];
-    int x0 = -d->fb_wide;
     row_scroll[row] = d->reg[R_BXR] & 0x3FF;
-    if (cr & 0x80) render_bg(d, y, x0, w, bg);
-    if (cr & 0x40) render_sprites(d, row, x0, w, sp);
-    {
-        bool any = false;
-        for (int x = d->fb_wide; x < d->fb_wide + 256 && x < w && !any; x++) any = bg[x] != 0;
-        row_bg_blank[row] = !any;
-        row_bg_edge[row] = d->fb_wide && w >= 4 && (bg[0] | bg[1] | bg[2] | bg[3]) != 0;
-    }
+    if (cr & 0x80) render_bg(d, y, w, bg);
+    if (cr & 0x40) render_sprites(d, row, w, sp);
 
     uint32_t *dst = &d->fb[row * PCE_FB_MAX_W];
     for (int x = 0; x < w; x++) {
@@ -341,19 +322,5 @@ void vdc_line_end(Vdc *d, const Vce *vce, int line)
         if (s && ((s & 0x8000) || !bg[x])) dst[x] = vce->argb[s & 0x1FF];
         else if (bg[x]) dst[x] = vce->argb[bg[x]];
         else dst[x] = vce->argb[0];
-    }
-    if (d->fb_wide) {
-        /* beyond the room's walls (or the original 256 pixels on a clipped row): black
-         * behind the sprites */
-        int x0 = d->wide_x0 < 0 ? 0 : d->wide_x0, x1 = d->wide_x1 > w ? w : d->wide_x1;
-        if (row_clip && row_clip[row]) {
-            if (row_clip[row] == VDC_CLIP_BOTH && x0 < d->fb_wide) x0 = d->fb_wide;
-            if (x1 > d->fb_wide + 256) x1 = d->fb_wide + 256;
-        }
-        for (int x = 0; x < w; x++) {
-            if (x >= x0 && x < x1) continue;
-            uint16_t s = sp[x];
-            dst[x] = s ? vce->argb[s & 0x1FF] : 0xFF000000u;
-        }
     }
 }

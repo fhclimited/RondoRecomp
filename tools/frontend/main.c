@@ -29,7 +29,6 @@
 #include "settings.h"
 #include "theme.h"
 #include "video.h"
-#include "wide.h"
 #include "prompt.h"
 
 #define FRAME_RATE (7159090.0 / (455.0 * 263.0))   /* 59.826 Hz */
@@ -144,12 +143,10 @@ static bool have_rewind;
 static GameWatch gw;
 static char pref_dir[1024];
 static bool no_save_files;   /* test runs: fresh backup RAM, nothing written to bram.bin */
-static Wide wide;            /* widescreen: decided before every frame */
 static TitlePrompt prompt;   /* the title's PUSH RUN BUTTON! as this PC's button (pad set per frame) */
 
 static void run_frame(void)
 {
-    wide_frame(&wide, &pce);
     prompt_before_frame(&prompt, &pce);
     pce_run_frame(&pce);
     prompt_after_frame(&prompt, &pce);
@@ -308,6 +305,16 @@ static bool test_input(const SDL_Event *ev)
     }
 }
 
+/* VSync: each frame is shown on the screen's refresh, never part-way through one (no
+ * tearing). The game's own timing (59.826 Hz, the frame timer in the main loop) still sets
+ * the pace, so on a 60 Hz screen one frame in about 350 is shown twice; on a variable
+ * refresh screen none. */
+static void set_vsync(SDL_Renderer *ren, bool on)
+{
+    if (!SDL_SetRenderVSync(ren, on ? 1 : SDL_RENDERER_VSYNC_DISABLED) && on)
+        SDL_SetRenderVSync(ren, SDL_RENDERER_VSYNC_ADAPTIVE);
+}
+
 static void screenshot(SDL_Renderer *ren, const char *path)
 {
     SDL_Surface *s = SDL_RenderReadPixels(ren, NULL);
@@ -315,6 +322,34 @@ static void screenshot(SDL_Renderer *ren, const char *path)
         SDL_SaveBMP(s, path);
         SDL_DestroySurface(s);
     }
+}
+
+/* features test: a Controls page count fed presses. Each step is a controller button (b >= 0)
+ * or a key (-scancode), pressed or let go. */
+typedef struct CountStep { int b; bool down; } CountStep;
+
+static void count_feed(Menu *m, Settings *s, const Input *in, const CountStep *steps, int n)
+{
+    for (int i = 0; i < n; i++) {
+        SDL_Event e;
+        SDL_zero(e);
+        if (steps[i].b >= 0) {
+            e.type = steps[i].down ? SDL_EVENT_GAMEPAD_BUTTON_DOWN : SDL_EVENT_GAMEPAD_BUTTON_UP;
+            e.gbutton.button = (Uint8)steps[i].b;
+            e.gbutton.down = steps[i].down;
+        } else {
+            e.type = steps[i].down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            e.key.scancode = (SDL_Scancode)-steps[i].b;
+            e.key.down = steps[i].down;
+        }
+        menu_capture(m, s, in, &e);
+    }
+}
+
+static void count_end(Menu *m, Settings *s)
+{
+    m->capture_until = 0;                  /* the count is over */
+    menu_update(m, s);
 }
 
 int main(int argc, char **argv)
@@ -358,7 +393,6 @@ int main(int argc, char **argv)
         if (features_dir) {
             set.skip = SKIP_AUTO;
             set.cheat_health = set.cheat_hearts = set.cheat_lives = true;
-            set.widescreen = true;   /* experimental and off by default, but tested */
         }
     }
 
@@ -374,6 +408,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "SDL video setup: %s\n", SDL_GetError());
         return 1;
     }
+    set_vsync(ren, set.vsync && !test_mode);   /* test runs go as fast as they can */
 
     char disc_path[1024];
     if (!choose_disc(win, ren, disc_arg, disc_path, sizeof disc_path)) {
@@ -429,8 +464,9 @@ int main(int argc, char **argv)
     Uint64 next = SDL_GetTicksNS();
     bool running = true, cursor_shown = true;
     bool was_rewinding = false, skipping = false, hold_input = false;
-    bool skip_intro = false;       /* the scene being skipped is the power-on intro */
+    bool skip_intro = false;       /* the scene run fast is the power-on intro (features test) */
     bool skip_to_title = false;    /* Play on the start screen: on from power-on to the title screen */
+    bool skip_power_on = false;    /* Start, A or X pressed in the logo or the intro: to the title */
     int rewind_held_frames = 0;
     /* autotest bookkeeping */
     int t_rewound = 0;
@@ -444,6 +480,8 @@ int main(int argc, char **argv)
             t_start_loops++;
             int since = t_start_loops - t_phase_at;
             bool title = pce.wram[RONDO_STATE] == RONDO_OPENING && pce.wram[RONDO_SUB] >= 2;
+            static bool t_ran_fast;        /* the game's own skip: nothing is run fast */
+            if (skipping) t_ran_fast = true;
             if (t_phase == 0 && t_start_loops == 600) {
                 TLOG("autotest-start: start screen up for %d frames, game frame %llu (%s)\n", t_start_loops - 1,
                      (unsigned long long)pce.frame,
@@ -463,36 +501,47 @@ int main(int argc, char **argv)
                 SDL_PushEvent(&click);
                 t_phase = 1;
                 t_phase_at = t_start_loops;
-            } else if (t_phase == 1 && ((since >= 5 && !skipping) || since > 3000)) {
-                TLOG("autotest-start: after clicking Play: %s, %d screen frames later game frame %llu, state %02X/%02X (%s)\n",
+            } else if (t_phase == 1 && ((!menu.open && title) || since > 3000)) {
+                TLOG("autotest-start: after clicking Play: %s, %d screen frames later game frame %llu, state %02X/%02X (%s%s)\n",
                      menu.open ? "STILL ON THE START SCREEN" : "playing", since, (unsigned long long)pce.frame,
                      pce.wram[RONDO_STATE], pce.wram[RONDO_SUB],
-                     title ? "the title screen: logo and intro skipped" : "NOT AT THE TITLE SCREEN");
+                     title ? "the title screen: logo and intro skipped" : "NOT AT THE TITLE SCREEN",
+                     t_ran_fast ? ", BUT RUN FAST" : ", the game's own skip");
                 start_game(&ss, ss.disc, err, sizeof err);      /* power-on, no Play */
-                skip_to_title = skipping = false;
+                skip_to_title = skip_power_on = skipping = false;
                 t_phase = 2;
                 t_phase_at = t_start_loops;
             } else if (t_phase == 2 && pce.frame >= 1000) {
-                TLOG("autotest-start: power-on again, frame %llu: state %02X/%02X (the intro), pressing START\n",
+                TLOG("autotest-start: power-on again, frame %llu: state %02X/%02X (the intro), pressing Jump (X)\n",
                      (unsigned long long)pce.frame, pce.wram[RONDO_STATE], pce.wram[RONDO_SUB]);
                 SDL_Event key = {0};
                 key.type = SDL_EVENT_KEY_DOWN;
                 key.key.windowID = SDL_GetWindowID(win);
-                key.key.scancode = SDL_SCANCODE_RETURN;
-                key.key.key = SDLK_RETURN;
+                key.key.scancode = (SDL_Scancode)set.bind_key[ACT_JUMP];
                 key.key.down = true;
                 key.key.which = TEST_INPUT;
                 SDL_PushEvent(&key);
                 t_phase = 3;
                 t_phase_at = t_start_loops;
-            } else if (t_phase == 3 && ((since >= 5 && !skipping) || since > 3000)) {
-                TLOG("autotest-start: %d screen frames after START: game frame %llu, state %02X/%02X (%s)\n", since,
+            } else if (t_phase == 3 && (title || since > 3000)) {
+                TLOG("autotest-start: %d screen frames after Jump: game frame %llu, state %02X/%02X (%s%s)\n", since,
                      (unsigned long long)pce.frame, pce.wram[RONDO_STATE], pce.wram[RONDO_SUB],
-                     title ? "the title screen: intro skipped" : "INTRO NOT SKIPPED");
+                     title ? "the title screen: intro skipped" : "INTRO NOT SKIPPED",
+                     t_ran_fast ? ", BUT RUN FAST" : ", the game's own skip");
+                set.skip = SKIP_AUTO;                           /* power-on with "automatically" */
+                start_game(&ss, ss.disc, err, sizeof err);
+                skip_to_title = skip_power_on = skipping = false;
+                t_phase = 4;
+                t_phase_at = t_start_loops;
+            } else if (t_phase == 4 && (title || since > 3000)) {
+                TLOG("autotest-start: skip automatically: %d screen frames after power-on: game frame %llu, state %02X/%02X (%s%s)\n",
+                     since, (unsigned long long)pce.frame, pce.wram[RONDO_STATE], pce.wram[RONDO_SUB],
+                     title ? "the title screen: logo and intro skipped" : "NOT AT THE TITLE SCREEN",
+                     t_ran_fast ? ", BUT RUN FAST" : ", the game's own skip");
                 running = false;
             }
         }
-        bool start_pressed = false;
+        bool start_pressed = false, skip_pressed = false;
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) { running = false; continue; }
@@ -586,6 +635,7 @@ int main(int argc, char **argv)
                     break;
                 case MENU_VIDEO_CHANGED:
                     SDL_SetWindowFullscreen(win, set.fullscreen);
+                    set_vsync(ren, set.vsync && !test_mode);
                     if (!test_mode) settings_save(&set, settings_path);
                     break;
                 case MENU_SETTINGS_CHANGED:
@@ -594,6 +644,7 @@ int main(int argc, char **argv)
                 default:
                     break;
                 }
+                if (!menu.open) input_cancel_macros(&in);   /* a button pressed in it is not one let go in play */
                 continue;
             }
             /* playing */
@@ -632,13 +683,16 @@ int main(int argc, char **argv)
             }
             if (input_pressed(&in, &ev, ACT_MENU)) open_menu = true;
             if (input_pressed(&in, &ev, ACT_PAUSE)) start_pressed = true;
+            if (start_pressed || input_pressed(&in, &ev, ACT_JUMP) || input_pressed(&in, &ev, ACT_ATTACK))
+                skip_pressed = true;
             if (open_menu && !test_mode) {
                 menu_open(&menu);
                 input_cancel_macros(&in);
             }
         }
         if (menu.open) {
-            menu_update(&menu);
+            if (menu_update(&menu, &set) == MENU_SETTINGS_CHANGED && !test_mode)   /* a control's count ended */
+                settings_save(&set, settings_path);
             Nav nav = test_mode || menu_capturing(&menu) ? NAV_NONE : input_nav_stick(&in);
             if (nav != NAV_NONE) {
                 MenuResult r = menu_nav(&menu, &set, nav);    /* the stick only steps and changes values */
@@ -647,7 +701,10 @@ int main(int argc, char **argv)
                     if (menu_on_start_screen(&menu)) start_screen_info(&menu, &ss, &set, disc_path);
                 }
                 if (r == MENU_SETTINGS_CHANGED || r == MENU_VIDEO_CHANGED || r == MENU_LANGUAGE) {
-                    if (r == MENU_VIDEO_CHANGED) SDL_SetWindowFullscreen(win, set.fullscreen);
+                    if (r == MENU_VIDEO_CHANGED) {
+                        SDL_SetWindowFullscreen(win, set.fullscreen);
+                        set_vsync(ren, set.vsync && !test_mode);
+                    }
                     if (!test_mode) settings_save(&set, settings_path);
                 }
             }
@@ -658,22 +715,27 @@ int main(int argc, char **argv)
                                                                                        : "PUSH  PAUSE  BUTTON!")
                                  : (set.bind_key[ACT_PAUSE] == SDL_SCANCODE_RETURN ? "PUSH  ENTER  KEY!" : "PUSH  PAUSE  KEY!");
         GameCheats cheats = {set.cheat_health, set.cheat_hearts, set.cheat_lives, set.maria_unlocked, set.play_maria};
-        {   /* widescreen fills the window's shape */
-            int ww, wh;
-            SDL_GetRenderOutputSize(ren, &ww, &wh);
-            wide.want = set.widescreen && wh > 0
-                            ? wide_extent((double)ww / (double)wh, video_picture_aspect(&video, &set)) : 0;
-        }
         bool rewinding = false, ran_frame = false;
         if (menu_on_start_screen(&menu)) {
             /* the start screen: the game waits for Play (nothing runs, nothing sounds) */
         } else if (!menu.open) {
-            /* Play on the start screen goes on to the title screen: from power-on (the logo,
-             * state $00) through the intro */
-            bool to_title = skip_to_title && (game_state(&pce) == 0x00 || game_in_intro(&pce));
-            if (skip_to_title && !to_title) skip_to_title = false;
-            if (!skipping && (to_title || (game_in_skippable(&pce) &&
-                              (set.skip == SKIP_AUTO || (set.skip == SKIP_START && start_pressed))))) {
+            /* The logo and the intro: the game's own skip to the title screen (game.h), unless
+             * Skip cinematics is Never. Start, A (Jump) or X (Attack) asks for it; Play on the
+             * start screen and "automatically" ask at once. The frontend then presses START
+             * for the game where it looks for it. */
+            bool power_on = game_in_power_on(&pce);
+            bool own_skip = power_on && set.skip != SKIP_OFF && !features_dir;
+            if (!power_on) skip_to_title = skip_power_on = false;
+            if (own_skip) {
+                game_allow_power_on_skip(&pce);
+                if (skip_pressed) skip_power_on = true;
+            }
+            bool press_start = own_skip && (skip_power_on || skip_to_title || set.skip == SKIP_AUTO);
+            /* Story scenes have no skip of their own: they run fast instead (so does the intro in
+             * the features test, whose recorded input counts on every frame of it). */
+            if (!skipping && ((features_dir && game_in_intro(&pce) && set.skip == SKIP_AUTO) ||
+                              (game_in_cinematic(&pce) &&
+                               (set.skip == SKIP_AUTO || (set.skip == SKIP_START && start_pressed))))) {
                 skipping = true;
                 skip_intro = !game_in_cinematic(&pce);
                 if (features_dir) { t_cine_start = (long)pce.frame; t_cine_ns = SDL_GetTicksNS(); }
@@ -707,9 +769,7 @@ int main(int argc, char **argv)
                  * in a story scene an occasional I press, in case it waits for a button; none in
                  * the intro, which ignores buttons, so the title screen is not passed by) */
                 Uint64 t0 = SDL_GetTicksNS();
-                while ((skip_intro ? game_in_intro(&pce) || (skip_to_title && game_state(&pce) == 0x00)
-                                   : game_in_cinematic(&pce)) &&
-                       SDL_GetTicksNS() - t0 < 12000000) {
+                while ((skip_intro ? game_in_intro(&pce) : game_in_cinematic(&pce)) && SDL_GetTicksNS() - t0 < 12000000) {
                     pce.pad = !skip_intro && (pce.frame & 15) < 4 ? PAD_I : 0;
                     run_frame();
                     audio_frac += AUDIO_RATE / FRAME_RATE;   /* a frame's worth, not heard */
@@ -720,11 +780,9 @@ int main(int argc, char **argv)
                     flush_bram(&ss);
                 }
                 ran_frame = true;
-                bool still = skip_intro ? game_in_intro(&pce) || (skip_to_title && game_state(&pce) == 0x00)
-                                        : game_in_cinematic(&pce);
+                bool still = skip_intro ? game_in_intro(&pce) : game_in_cinematic(&pce);
                 if (!still) {
                     skipping = false;
-                    if (skip_intro) skip_to_title = false;
                     hold_input = true;
                     if (have_rewind) rewind_record(&rw, &pce, 0);   /* one step back over the whole scene */
                     if (features_dir) {
@@ -764,6 +822,8 @@ int main(int argc, char **argv)
                     if (pad) pad = 0;
                     else hold_input = false;
                 }
+                if (press_start)                   /* the game's own skip: a new START every 8 frames */
+                    pad = game_power_on_skippable(&pce) && (pce.frame & 7) < 4 ? PAD_RUN : 0;
                 pce.pad = pad;
                 run_frame();
                 game_apply_cheats(&pce, &cheats, &gw);
@@ -793,37 +853,21 @@ int main(int argc, char **argv)
         }
 
         /* video */
-        {   /* widescreen grows out of the 4:3 picture instead of appearing at once (the Prologue
-             * after its story scene, a scrolling room after a shaft): the columns shown each side
-             * ease towards what the frame has, about 90% of the way in half a second; back
-             * to 4:3 is at once (the game no longer draws them) */
-            static double shown;
-            static int growing;   /* frames the current growth has taken (logged by the features test) */
-            int have = pce.vdc.fb_wide;
-            if (have <= shown) {
-                if (growing > 1 && have > 0 && features_dir)
-                    TLOG("features: widescreen grew out of the 4:3 picture over %d frames (to %d px a side, frame %llu)\n",
-                         growing, have, (unsigned long long)pce.frame);
-                shown = have;
-                growing = 0;
-            } else if (ran_frame) {
-                shown += (have - shown) * 0.09 + 0.25;
-                growing++;
-                if (shown > have) shown = have;
-            }
-            int cut = features_dir ? 0 : have - (int)shown;   /* the test's screenshots: the whole picture */
-            video_upload(&video, pce.vdc.fb + cut, pce.vdc.fb_w - 2 * cut, pce.vdc.fb_h, PCE_FB_MAX_W, have - cut);
-        }
+        video_upload(&video, pce.vdc.fb, pce.vdc.fb_w, pce.vdc.fb_h, PCE_FB_MAX_W);
         if (features_dir && !t_shots && pce.frame >= 17880) {
-            /* screenshots: 16:9 window with each picture mode, then the menu pages */
+            /* screenshots: 16:9 window with each picture mode and screen effect, then the menu
+             * pages */
             t_shots = true;
-            TLOG("features: frame %llu state %02X/%02X drawn %d px wider (want %d, game changes %s, "
-                 "scenery %d, map %04X)\n", (unsigned long long)pce.frame, pce.wram[0x30], pce.wram[0x31],
-                 pce.vdc.fb_wide, wide.want, wide.patched ? "in" : "out", wide.scenery_moving, pce.vdc.reg[9]);
-            static const struct { int aspect, integer, filter, sides; const char *name; } modes[] = {
-                {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLUR, "wide_4x3_blur"},
-                {ASPECT_STRETCH, 0, FILTER_SHARP, SIDES_BLUR, "wide_stretch"},
-                {ASPECT_SQUARE, 1, FILTER_NEAREST, SIDES_BLACK, "wide_square_integer"},
+            TLOG("features: frame %llu state %02X/%02X, picture %dx%d\n", (unsigned long long)pce.frame,
+                 pce.wram[0x30], pce.wram[0x31], pce.vdc.fb_w, pce.vdc.fb_h);
+            static const struct { int aspect, integer, filter, sides, effect; const char *name; } modes[] = {
+                {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLUR, EFFECT_OFF, "video_4x3_blur"},
+                {ASPECT_STRETCH, 0, FILTER_SHARP, SIDES_BLUR, EFFECT_OFF, "video_stretch"},
+                {ASPECT_SQUARE, 1, FILTER_NEAREST, SIDES_BLACK, EFFECT_OFF, "video_square_integer"},
+                {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLACK, EFFECT_SCANLINES, "effect_scanlines"},
+                {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLACK, EFFECT_CRT, "effect_crt"},
+                {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLUR, EFFECT_CURVED, "effect_curved_crt"},
+                {ASPECT_4_3, 0, FILTER_SHARP, SIDES_BLACK, EFFECT_COMPOSITE, "effect_composite"},
             };
             Settings keep = set;
             char path[1200];
@@ -832,6 +876,8 @@ int main(int argc, char **argv)
                 set.scaling = modes[i].integer ? SCALE_WHOLE : SCALE_FIT;
                 set.filter = modes[i].filter;
                 set.sides = modes[i].sides;
+                set.effect = modes[i].effect;
+                set.effect_strength = STRENGTH_MEDIUM;
                 video_draw(&video, &set);
                 snprintf(path, sizeof path, "%s/%s.bmp", features_dir, modes[i].name);
                 screenshot(ren, path);
@@ -890,6 +936,10 @@ int main(int argc, char **argv)
             int bbad = bind_check(merr, sizeof merr);
             TLOG("features: controls: %s%s\n", bbad ? "PROBLEM: " : "assigning, swapping, clearing and names ok",
                  bbad ? merr : "");
+            int ibad = input_check(merr, sizeof merr);
+            TLOG("features: controller combinations: %s%s\n",
+                 ibad ? "PROBLEM: " : "Back + RB / LB save and load, Back alone is the menu, RB / LB keep their own",
+                 ibad ? merr : "");
             {   /* the Controls page with Save state waiting for its button */
                 Menu cm = {0};
                 menu_open(&cm);
@@ -903,7 +953,62 @@ int main(int argc, char **argv)
                 char cpath[1200];
                 snprintf(cpath, sizeof cpath, "%s/menu_controls_waiting.bmp", features_dir);
                 screenshot(ren, cpath);
-                TLOG("features: controls page: Save state %s\n", menu_capturing(&cm) ? "waits for a button or key" : "DOES NOT WAIT");
+                TLOG("features: controls page: Save state %s\n", menu_capturing(&cm) ? "counts down for its control" : "DOES NOT COUNT");
+                /* Save state's count: the A that chose the row let go, Back and RB held at the end */
+                const int BACK = SDL_GAMEPAD_BUTTON_BACK, RB = SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                          LB = SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, B = SDL_GAMEPAD_BUTTON_EAST;
+                Settings cs = set;
+                const CountStep held[] = {{SDL_GAMEPAD_BUTTON_SOUTH, false}, {BACK, true}, {RB, true}};
+                count_feed(&cm, &cs, &in, held, 3);
+                bool counting = menu_capturing(&cm) && cs.bind_pad[ACT_SAVE] == set.bind_pad[ACT_SAVE];
+                video_draw(&video, &cs);
+                menu_draw(&cm, &cs, ren);
+                snprintf(cpath, sizeof cpath, "%s/menu_controls_count.bmp", features_dir);
+                screenshot(ren, cpath);
+                count_end(&cm, &cs);
+                bool held_ok = counting && cs.bind_pad[ACT_SAVE] == BIND_COMBO(BACK, RB) && !menu_capturing(&cm);
+                /* Load state: B pressed and let go during the count; then a key (F9) likewise */
+                menu_nav(&cm, &cs, NAV_DOWN);
+                menu_nav(&cm, &cs, NAV_OK);
+                const CountStep tap[] = {{B, true}, {B, false}};
+                count_feed(&cm, &cs, &in, tap, 2);
+                count_end(&cm, &cs);
+                bool tap_ok = cs.bind_pad[ACT_LOAD] == B;
+                menu_nav(&cm, &cs, NAV_OK);
+                const CountStep key[] = {{-SDL_SCANCODE_F9, true}, {-SDL_SCANCODE_F9, false}};
+                count_feed(&cm, &cs, &in, key, 2);
+                count_end(&cm, &cs);
+                bool key_ok = cs.bind_key[ACT_LOAD] == SDL_SCANCODE_F9 && cs.bind_pad[ACT_LOAD] == B;
+                /* X on the row clears its controller button (the key stays) */
+                menu_nav(&cm, &cs, NAV_CLEAR_PAD);
+                bool clear_ok = cs.bind_pad[ACT_LOAD] == BIND_NONE && cs.bind_key[ACT_LOAD] == SDL_SCANCODE_F9;
+                /* Save state: three buttons held, then nothing at all: both leave it */
+                menu_nav(&cm, &cs, NAV_UP);
+                menu_nav(&cm, &cs, NAV_OK);
+                const CountStep three[] = {{BACK, true}, {LB, true}, {RB, true}};
+                count_feed(&cm, &cs, &in, three, 3);
+                count_end(&cm, &cs);
+                bool three_ok = cs.bind_pad[ACT_SAVE] == BIND_COMBO(BACK, RB);
+                menu_nav(&cm, &cs, NAV_OK);
+                count_end(&cm, &cs);
+                bool none_ok = cs.bind_pad[ACT_SAVE] == BIND_COMBO(BACK, RB) && cs.bind_key[ACT_SAVE] == set.bind_key[ACT_SAVE];
+                /* the same two again: kept, not cleared */
+                menu_nav(&cm, &cs, NAV_OK);
+                const CountStep again[] = {{BACK, true}, {RB, true}};
+                count_feed(&cm, &cs, &in, again, 2);
+                count_end(&cm, &cs);
+                bool again_ok = cs.bind_pad[ACT_SAVE] == BIND_COMBO(BACK, RB);
+                bool ok = held_ok && tap_ok && key_ok && clear_ok && three_ok && none_ok && again_ok;
+                TLOG("features: controls page count: %s (held %s, tapped %s, key %s, X clears %s, three %s, nothing %s, "
+                     "same again %s; save state: %s, load state: %s / %s)\n",
+                     ok ? "Back + RB held at the end records Back + RB" : "DOES NOT RECORD AS IT SHOULD", held_ok ? "ok" : "WRONG",
+                     tap_ok ? "ok" : "WRONG", key_ok ? "ok" : "WRONG", clear_ok ? "ok" : "WRONG", three_ok ? "ok" : "WRONG",
+                     none_ok ? "ok" : "WRONG", again_ok ? "ok" : "WRONG", bind_pad_name(cs.bind_pad[ACT_SAVE]),
+                     bind_pad_name(cs.bind_pad[ACT_LOAD]), bind_key_name(cs.bind_key[ACT_LOAD]));
+                video_draw(&video, &cs);
+                menu_draw(&cm, &cs, ren);
+                snprintf(cpath, sizeof cpath, "%s/menu_controls_combos.bmp", features_dir);
+                screenshot(ren, cpath);
             }
             int mbad = menu_check(&set, ren, merr, sizeof merr);
             TLOG("features: menu check: %s%s\n", mbad ? "PROBLEM at " : "every value of every option ok",
@@ -911,14 +1016,14 @@ int main(int argc, char **argv)
         }
         static bool t_stage1_shot;
         if (features_dir && !t_stage1_shot && pce.frame >= 20060) {
-            /* Stage 1 with the window's widescreen */
+            /* Stage 1 */
             t_stage1_shot = true;
             char path[1200];
             video_draw(&video, &set);
-            snprintf(path, sizeof path, "%s/stage1_widescreen.bmp", features_dir);
+            snprintf(path, sizeof path, "%s/stage1.bmp", features_dir);
             screenshot(ren, path);
-            TLOG("features: Stage 1 at frame %llu drawn %d px wider on each side (game changes %s)\n",
-                 (unsigned long long)pce.frame, pce.vdc.fb_wide, wide.patched ? "in place" : "missing");
+            TLOG("features: Stage 1 at frame %llu (state %02X/%02X)\n", (unsigned long long)pce.frame,
+                 pce.wram[RONDO_STATE], pce.wram[RONDO_SUB]);
             TLOG("features: title screen's PUSH RUN BUTTON! %s (%d frames, as the %s)\n",
                  prompt.frames ? "replaced" : "NOT REPLACED", prompt.frames, prompt.pad ? "controller's" : "keyboard's");
         }
@@ -938,7 +1043,8 @@ int main(int argc, char **argv)
         } else if (SDL_GetTicks() < osd_until) {
             draw_banner(ren, osd_text, false);
         }
-        if (!menu.open && !skipping && set.skip == SKIP_START && game_in_skippable(&pce)) {
+        if (!menu.open && !skipping && set.skip == SKIP_START &&
+            (game_in_cinematic(&pce) || game_power_on_skippable(&pce))) {
             char skip_line[64];
             snprintf(skip_line, sizeof skip_line, "%s: skip",
                      input_pad_last(&in) ? bind_pad_name(set.bind_pad[ACT_PAUSE]) : bind_key_name(set.bind_key[ACT_PAUSE]));
@@ -987,6 +1093,10 @@ int main(int argc, char **argv)
                 const RecompStats *rs = recomp_stats();
                 uint64_t tot = rs->native_cycles + rs->interp_cycles;
                 fputs(autotest_log, lf);
+                int vsync = 0;
+                SDL_GetRenderVSync(ren, &vsync);
+                fprintf(lf, "video: %s, vsync %s\n", SDL_GetRendererName(ren),
+                        vsync == 1 ? "on" : vsync == SDL_RENDERER_VSYNC_ADAPTIVE ? "adaptive" : "off");
                 fprintf(lf, "build: %s\nframes: %llu\nrecompiled chunks: %d, entry points: %d\n"
                             "CPU cycles native: %.2f%%\nchunk calls: %llu\nentry points without native code: %u\n",
                         recomp_build_id, (unsigned long long)pce.frame, recomp_chunk_count, recomp_entry_count,

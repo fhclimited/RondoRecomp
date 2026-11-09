@@ -26,7 +26,6 @@ set(FRONTEND_SOURCES
   tools/frontend/main.c
   tools/frontend/locate.c
   tools/frontend/game.c
-  tools/frontend/wide.c
   tools/frontend/prompt.c
   tools/frontend/input.c
   tools/frontend/binds.c

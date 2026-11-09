@@ -11,7 +11,6 @@
 #include "pce/pce.h"
 #include "pce/state.h"
 #include "../frontend/game.h"
-#include "../frontend/wide.h"
 #include "../frontend/prompt.h"
 #include "recomp/recomp.h"
 #include "../recomp/capture_script.h"
@@ -60,6 +59,33 @@ static void write_watch(Pce *p)
     ww_prev_y = p->cpu.y;
 }
 
+/* --pal-watch LO:HI: report which instruction changed these VCE palette entries (frame,
+ * scanline, the new values), within --watch-frames */
+static int pw_lo = -1, pw_hi = -1;
+static uint16_t pw_last[512];
+static uint16_t pw_prev_pc;
+static uint8_t pw_prev_bank;
+
+static void pal_watch(Pce *p)
+{
+    long f = (long)p->frame;
+    int changed = 0, first = -1;
+    for (int i = pw_lo; i <= pw_hi; i++)
+        if (p->vce.pal[i] != pw_last[i]) {
+            if (first < 0) first = i;
+            changed++;
+        }
+    if (changed && f >= ww_from && f < ww_to && ww_count < ww_max) {
+        printf("  [pal] f%ld l%03d %02X:%04X  %d changed from %03X:", f, p->line, pw_prev_bank, pw_prev_pc, changed, first);
+        for (int i = first; i <= pw_hi && i < first + 16; i++) printf(" %03X", p->vce.pal[i]);
+        printf("\n");
+        ww_count++;
+    }
+    if (changed) memcpy(&pw_last[pw_lo], &p->vce.pal[pw_lo], (size_t)(pw_hi - pw_lo + 1) * sizeof pw_last[0]);
+    pw_prev_pc = p->cpu.pc;
+    pw_prev_bank = p->cpu.mpr[p->cpu.pc >> 13];
+}
+
 /* --vram-watch LO:HI: count, per instruction address, VRAM writes landing in [LO, HI]
  * (seen as the write address register stepping), printed at the end */
 static unsigned vw_lo = 1, vw_hi = 0;
@@ -89,6 +115,7 @@ static void step_hook(Pce *p, void *ctx)
     (void)ctx;
     if (vw_count) vram_watch(p);
     if (n_ww) write_watch(p);
+    if (pw_lo >= 0) pal_watch(p);
     else if (vw_count) {
         ww_prev_pc = p->cpu.pc;
         ww_prev_bank = p->cpu.mpr[p->cpu.pc >> 13];
@@ -166,7 +193,6 @@ int main(int argc, char **argv)
     long skipped = 0;
     FILE *ram_trace = NULL;   /* --ram-trace FILE: WRAM after every frame */
     long start_frame = 0;
-    int wide = 0;   /* --wide N: widescreen extension in pixels per side */
     int prompt_dev = -1;   /* --prompt pad|keys: the title's PUSH RUN BUTTON! as rondo.exe shows it */
     long vram_dump_at = -1;            /* --dump-vram FRAME:FILE: all of VRAM after that frame */
     long adpcm_dump_at = -1;           /* --dump-adpcm FRAME:FILE: the 64 KiB of ADPCM RAM */
@@ -174,8 +200,6 @@ int main(int argc, char **argv)
     char vram_dump_path[256] = "";
     long run_at[16][2]; /* --run FRAME:LEN: hold the run button */
     int n_run = 0;
-    long wrep_at[8]; /* --wide-report FRAME: which widescreen game changes are in */
-    int n_wrep = 0;
     long rows_from = -1, rows_to = -1;   /* --row-scroll A:B: each frame's bands of rows by X scroll */
     long sat_at[8]; /* --dump-sat FRAME: print the sprite table after that frame */
     int n_sat = 0;
@@ -243,19 +267,12 @@ int main(int argc, char **argv)
             for (char *t = strtok(tmp, ","); t && n_ww < 16; t = strtok(NULL, ","))
                 ww_addr[n_ww++] = (unsigned)strtoul(t, NULL, 16) & 0x1FFF;
         }
-        else if (!strcmp(argv[i], "--wide") && i + 1 < argc) wide = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--prompt") && i + 1 < argc) prompt_dev = !strcmp(argv[++i], "pad");
         else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &vram_dump_at, vram_dump_path);
         else if (!strcmp(argv[i], "--dump-adpcm") && i + 1 < argc) sscanf(argv[++i], "%ld:%255s", &adpcm_dump_at, adpcm_dump_path);
-        else if (!strcmp(argv[i], "--wide-skip") && i + 1 < argc) {   /* leave patches out: list of indexes */
-            char tmp[128];
-            snprintf(tmp, sizeof tmp, "%s", argv[++i]);
-            for (char *t = strtok(tmp, ","); t; t = strtok(NULL, ",")) wide_debug_skip |= 1u << atoi(t);
-        }
         else if (!strcmp(argv[i], "--run") && i + 1 < argc && n_run < 16) {
             if (sscanf(argv[++i], "%ld:%ld", &run_at[n_run][0], &run_at[n_run][1]) == 2) n_run++;
         }
-        else if (!strcmp(argv[i], "--wide-report") && i + 1 < argc && n_wrep < 8) wrep_at[n_wrep++] = atol(argv[++i]);
         else if (!strcmp(argv[i], "--row-scroll") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld", &rows_from, &rows_to);
         else if (!strcmp(argv[i], "--dump-sat") && i + 1 < argc && n_sat < 8) sat_at[n_sat++] = atol(argv[++i]);
         else if (!strcmp(argv[i], "--vram-watch") && i + 1 < argc) {
@@ -263,6 +280,10 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(argv[i], "--vram-frames") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld", &vw_from, &vw_to);
         else if (!strcmp(argv[i], "--scroll-log") && i + 1 < argc) scroll_log = fopen(argv[++i], "wb");
+        else if (!strcmp(argv[i], "--pal-watch") && i + 1 < argc) {
+            if (sscanf(argv[++i], "%x:%x", (unsigned *)&pw_lo, (unsigned *)&pw_hi) != 2 || pw_lo < 0 || pw_hi > 511 || pw_lo > pw_hi)
+                pw_lo = pw_hi = -1;
+        }
         else if (!strcmp(argv[i], "--watch-frames") && i + 1 < argc) sscanf(argv[++i], "%ld:%ld", &ww_from, &ww_to);
         else if (!strcmp(argv[i], "--watch-max") && i + 1 < argc) ww_max = atol(argv[++i]);
         else if (!strcmp(argv[i], "--dump-mem") && i + 1 < argc && n_mem < 4) {
@@ -330,16 +351,16 @@ int main(int argc, char **argv)
     recomp_set_verify(verify);
     if (no_native || seeds_path) recomp_set_enabled(false);   /* seeds: record every entry point */
     if (seeds_path) recomp_load_misses(seeds_path);
-    if (prof || n_watch || trace_left || n_ww || scroll_log || vw_count) pce.on_step = step_hook;
+    if (prof || n_watch || trace_left || n_ww || scroll_log || vw_count || pw_lo >= 0) pce.on_step = step_hook;
     if (load_state) {
         if (!pce_state_load(&pce, load_state, state_disc, err, sizeof err)) { fprintf(stderr, "load state: %s\n", err); return 1; }
         start_frame = (long)pce.frame;
         printf("state loaded: frame %ld\n", start_frame);
     }
     game_watch_reset(&gw, &pce);
-    Wide wd = {.want = wide};
     TitlePrompt tp = {.pad = prompt_dev == 1};
     for (int i = 0; i < n_ww; i++) ww_last[i] = pce.wram[ww_addr[i]];
+    memcpy(pw_last, pce.vce.pal, sizeof pw_last);
     uint8_t ram_last[32];
     for (int i = 0; i < n_ram; i++) ram_last[i] = pce.wram[ram_addr[i]];
 
@@ -366,7 +387,6 @@ int main(int argc, char **argv)
         for (int i = 0; i < n_poke; i++)
             if (f >= poke[i].from && f <= poke[i].to) pce.wram[poke[i].addr] = (uint8_t)poke[i].val;
         if (skip_cine && game_in_cinematic(&pce)) { pce.pad = 0; skipped++; }
-        wide_frame(&wd, &pce);
         if (prompt_dev >= 0) prompt_before_frame(&tp, &pce);
         pce_run_frame(&pce);
         if (prompt_dev >= 0) prompt_after_frame(&tp, &pce);
@@ -400,17 +420,11 @@ int main(int argc, char **argv)
             for (int y = 0; y < pce.vdc.fb_h;) {
                 int e = y;
                 while (e + 1 < pce.vdc.fb_h && rs[e + 1] == rs[y]) e++;
-                printf(" %d-%d=%d%s", y, e, rs[y], wd.row_clip[y] == 1 ? "P" : wd.row_clip[y] == 2 ? "E" : "");
+                printf(" %d-%d=%d", y, e, rs[y]);
                 y = e + 1;
             }
             printf("\n");
         }
-        for (int i = 0; i < n_wrep; i++)
-            if (wrep_at[i] == f + 1) {
-                static char buf[4096];
-                wide_report(&pce, buf, sizeof buf);
-                printf("widescreen changes after frame %ld (state %02X/%02X):\n%s", f + 1, pce.wram[0x30], pce.wram[0x31], buf);
-            }
         for (int i = 0; i < n_sat; i++)
             if (sat_at[i] == f + 1) {
                 printf("sprites after frame %ld (screen x, y; pattern; attr):\n", f + 1);
@@ -419,6 +433,12 @@ int main(int argc, char **argv)
                     if (!(e[0] & 0x3FF) && !(e[1] & 0x3FF)) continue;
                     printf("  %2d: x %4d y %4d  pat %03X attr %04X  raw x %04X\n", k, (e[1] & 0x3FF) - 32,
                            (e[0] & 0x3FF) - 64, (e[2] >> 1) & 0x3FF, e[3], e[1]);
+                }
+                printf("palettes (VCE: background 00-0F, sprites 10-1F; 9-bit GRB):\n");
+                for (int pal = 0; pal < 32; pal++) {
+                    printf("  %02X:", pal);
+                    for (int c = 0; c < 16; c++) printf(" %03X", pce.vce.pal[pal * 16 + c]);
+                    printf("\n");
                 }
             }
         if (vram_dump_at == f + 1) {

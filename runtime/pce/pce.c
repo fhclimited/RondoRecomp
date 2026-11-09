@@ -308,10 +308,10 @@ static bool creates_entry(uint8_t op)
     }
 }
 
-static void run_line(Pce *p)
+/* run the CPU (and HLE) up to master clock `end` */
+static void run_until(Pce *p, uint64_t end)
 {
     HuC6280 *c = &p->cpu;
-    uint64_t end = p->master + PCE_MASTER_PER_LINE;
     bool native = recomp_enabled();
     while (p->master < end) {
         int hle = try_hle(p);
@@ -394,7 +394,14 @@ void pce_run_frame(Pce *p)
     for (int line = 0; line < PCE_LINES_PER_FRAME; line++) {
         p->line = line;
         vdc_line_start(&p->vdc, line);
-        run_line(p);
+        uint64_t end = p->master + PCE_MASTER_PER_LINE;
+        if (line == p->vdc.display_end) {
+            /* vertical blank half a line in, after the raster compare's interrupt has read
+             * the status (vdc_vblank) */
+            run_until(p, p->master + PCE_MASTER_PER_LINE / 2);
+            vdc_vblank(&p->vdc);
+        }
+        run_until(p, end);
         vdc_line_end(&p->vdc, &p->vce, line);
     }
     p->frame++;

@@ -29,7 +29,7 @@ void bind_defaults(int pad[ACT_COUNT], int key[ACT_COUNT])
     }
 }
 
-const char *bind_pad_name(int pad)
+static const char *button_name(int pad)
 {
     switch (pad) {
     case BIND_NONE: return "-";
@@ -60,6 +60,21 @@ const char *bind_pad_name(int pad)
     }
 }
 
+const char *bind_pad_name(int pad)
+{
+    if (BIND_HOLD(pad) == BIND_NONE) return button_name(pad);
+    static char names[4][48];                     /* a few at once (one message names two) */
+    static int next;
+    char *out = names[next++ & 3], parts[2][24];
+    for (int i = 0; i < 2; i++) {                 /* "L3 (left stick)" is just "L3" in a pair */
+        snprintf(parts[i], sizeof parts[i], "%s", button_name(i ? BIND_PRESS(pad) : BIND_HOLD(pad)));
+        char *paren = strstr(parts[i], " (");
+        if (paren) *paren = 0;
+    }
+    snprintf(out, sizeof names[0], "%s + %s", parts[0], parts[1]);
+    return out;
+}
+
 const char *bind_key_name(int key)
 {
     if (key <= 0 || key >= SDL_SCANCODE_COUNT) return "-";
@@ -69,8 +84,18 @@ const char *bind_key_name(int key)
     return n && n[0] ? n : "?";
 }
 
+static bool button_valid(int b) { return (b >= 0 && b < 64) || b == BIND_LT || b == BIND_RT; }
+
+bool bind_pad_valid(int pad)
+{
+    if (pad == BIND_NONE || button_valid(pad)) return true;
+    int hold = BIND_HOLD(pad), press = BIND_PRESS(pad);
+    return pad > 0 && pad == BIND_COMBO(hold, press) && button_valid(hold) && button_valid(press) && hold != press;
+}
+
 bool bind_pad_reserved(int pad)
 {
+    if (BIND_HOLD(pad) != BIND_NONE) return bind_pad_reserved(BIND_HOLD(pad)) || bind_pad_reserved(BIND_PRESS(pad));
     return pad == SDL_GAMEPAD_BUTTON_DPAD_UP || pad == SDL_GAMEPAD_BUTTON_DPAD_DOWN ||
            pad == SDL_GAMEPAD_BUTTON_DPAD_LEFT || pad == SDL_GAMEPAD_BUTTON_DPAD_RIGHT ||
            pad == SDL_GAMEPAD_BUTTON_GUIDE;
@@ -90,19 +115,15 @@ const char *bind_assign(int pad[ACT_COUNT], int key[ACT_COUNT], int act, bool is
     int *set = is_pad ? pad : key, none = is_pad ? BIND_NONE : 0;
     if (is_pad ? bind_pad_reserved(value) : bind_key_reserved(value)) {
         snprintf(msg, sizeof msg, "%s is kept for %s.", is_pad ? bind_pad_name(value) : bind_key_name(value),
-                 is_pad ? (value == SDL_GAMEPAD_BUTTON_GUIDE ? "the system" : "moving")
+                 is_pad ? (BIND_HOLD(value) == SDL_GAMEPAD_BUTTON_GUIDE || BIND_PRESS(value) == SDL_GAMEPAD_BUTTON_GUIDE
+                               ? "the system" : "moving")
                  : value == SDL_SCANCODE_ESCAPE ? "the menu"
                  : value == SDL_SCANCODE_F6 || value == SDL_SCANCODE_F7 ? "the state slot"
                  : value == SDL_SCANCODE_F11 ? "fullscreen" : "moving");
         return msg;
     }
-    if (set[act] == value) {                      /* its own control again: clear it */
-        if (!ACTIONS[act].clearable) {
-            snprintf(msg, sizeof msg, "%s needs a %s.", ACTIONS[act].name, is_pad ? "button" : "key");
-            return msg;
-        }
-        set[act] = none;
-        snprintf(msg, sizeof msg, "%s: no %s.", ACTIONS[act].name, is_pad ? "button" : "key");
+    if (set[act] == value) {                      /* its own control again: kept */
+        snprintf(msg, sizeof msg, "%s: %s, as it was.", ACTIONS[act].name, is_pad ? bind_pad_name(value) : bind_key_name(value));
         return msg;
     }
     int old = set[act];
@@ -126,6 +147,20 @@ const char *bind_assign(int pad[ACT_COUNT], int key[ACT_COUNT], int act, bool is
     return msg;
 }
 
+const char *bind_clear(int pad[ACT_COUNT], int key[ACT_COUNT], int act, bool is_pad)
+{
+    static char msg[160];
+    if (act < 0 || act >= ACT_COUNT) return NULL;
+    if (!ACTIONS[act].clearable) {
+        snprintf(msg, sizeof msg, "%s needs a %s.", ACTIONS[act].name, is_pad ? "button" : "key");
+        return msg;
+    }
+    if (is_pad) pad[act] = BIND_NONE;
+    else key[act] = 0;
+    snprintf(msg, sizeof msg, "%s: no %s.", ACTIONS[act].name, is_pad ? "button" : "key");
+    return msg;
+}
+
 int bind_check(char *err, int errlen)
 {
     int pad[ACT_COUNT], key[ACT_COUNT], bad = 0;
@@ -145,13 +180,15 @@ int bind_check(char *err, int errlen)
     bind_assign(pad, key, ACT_SAVE, true, SDL_GAMEPAD_BUTTON_NORTH);
     if (pad[ACT_SAVE] != SDL_GAMEPAD_BUTTON_NORTH || pad[ACT_CRASH] != SDL_GAMEPAD_BUTTON_RIGHT_STICK)
         FAIL("Y to save state: Item Crash should have taken R3");
-    /* its own button again clears it where it may */
+    /* its own button again keeps it; clearing is its own step, where the game can do without */
     bind_assign(pad, key, ACT_LOAD, true, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-    if (pad[ACT_LOAD] != BIND_NONE) FAIL("load state's own button again did not clear it");
-    bind_assign(pad, key, ACT_JUMP, true, SDL_GAMEPAD_BUTTON_SOUTH);
+    if (pad[ACT_LOAD] != SDL_GAMEPAD_BUTTON_LEFT_STICK) FAIL("load state's own button again changed it");
+    bind_clear(pad, key, ACT_LOAD, true);
+    if (pad[ACT_LOAD] != BIND_NONE) FAIL("load state's button was not cleared");
+    bind_clear(pad, key, ACT_JUMP, true);
     if (pad[ACT_JUMP] != SDL_GAMEPAD_BUTTON_SOUTH) FAIL("jump was cleared");
     /* a key for an action that may not go without, from one that has none: refused */
-    bind_assign(pad, key, ACT_SAVE, false, SDL_SCANCODE_F5);   /* clears save's key */
+    bind_clear(pad, key, ACT_SAVE, false);
     bind_assign(pad, key, ACT_SAVE, false, SDL_SCANCODE_X);    /* jump's X: jump would get none */
     if (key[ACT_JUMP] != SDL_SCANCODE_X) FAIL("jump was left without a key");
     /* reserved controls and triggers */
@@ -160,6 +197,25 @@ int bind_check(char *err, int errlen)
     if (pad[ACT_ATTACK] != SDL_GAMEPAD_BUTTON_WEST || key[ACT_ATTACK] != SDL_SCANCODE_Z) FAIL("a reserved control was taken");
     bind_assign(pad, key, ACT_MENU, true, BIND_RT);
     if (pad[ACT_MENU] != BIND_RT || strcmp(bind_pad_name(pad[ACT_MENU]), "RT")) FAIL("RT for the menu");
+    /* combinations: Back + RB / Back + LB beside Back (menu), RB (backflip) and LB (run) */
+    bind_defaults(pad, key);
+    int save = BIND_COMBO(SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    int load = BIND_COMBO(SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    bind_assign(pad, key, ACT_SAVE, true, save);
+    bind_assign(pad, key, ACT_LOAD, true, load);
+    if (pad[ACT_SAVE] != save || pad[ACT_LOAD] != load || pad[ACT_MENU] != SDL_GAMEPAD_BUTTON_BACK ||
+        pad[ACT_FLIP] != SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER || pad[ACT_RUN] != SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)
+        FAIL("Back + RB / Back + LB for save / load state");
+    if (strcmp(bind_pad_name(save), "Back + RB") || strcmp(bind_pad_name(BIND_COMBO(SDL_GAMEPAD_BUTTON_LEFT_STICK, BIND_RT)), "L3 + RT"))
+        FAIL("names of combinations: %s", bind_pad_name(save));
+    bind_assign(pad, key, ACT_LOAD, true, save);                       /* swap */
+    if (pad[ACT_LOAD] != save || pad[ACT_SAVE] != load) FAIL("combinations did not swap");
+    bind_assign(pad, key, ACT_SAVE, true, BIND_COMBO(SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_DPAD_UP));
+    if (pad[ACT_SAVE] != load) FAIL("a combination with the d-pad was taken");
+    if (!bind_pad_valid(save) || !bind_pad_valid(BIND_COMBO(BIND_LT, BIND_RT)) || !bind_pad_valid(BIND_NONE) ||
+        bind_pad_valid(BIND_COMBO(SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_BACK)) || bind_pad_valid(-7) ||
+        bind_pad_valid(BIND_COMBO(200, 1)) || bind_pad_valid(77))
+        FAIL("valid controller bindings");
     if (strcmp(bind_key_name(SDL_SCANCODE_RETURN), "Enter") || strcmp(bind_key_name(SDL_SCANCODE_F5), "F5"))
         FAIL("key names");
 #undef FAIL

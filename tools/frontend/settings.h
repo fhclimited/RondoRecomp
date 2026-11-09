@@ -9,16 +9,20 @@ enum { ASPECT_4_3, ASPECT_SQUARE, ASPECT_STRETCH, ASPECT_COUNT };
 enum { FILTER_SHARP, FILTER_NEAREST, FILTER_SMOOTH, FILTER_COUNT };
 enum { SIDES_BLUR, SIDES_BLACK, SIDES_COUNT };
 enum { SCALE_FIT, SCALE_WHOLE, SCALE_COUNT };
+enum { EFFECT_OFF, EFFECT_SCANLINES, EFFECT_CRT, EFFECT_CURVED, EFFECT_COMPOSITE, EFFECT_COUNT };
+enum { STRENGTH_LIGHT, STRENGTH_MEDIUM, STRENGTH_STRONG, STRENGTH_COUNT };
 enum { SKIP_START, SKIP_AUTO, SKIP_OFF, SKIP_COUNT };
 enum { LANG_EN, LANG_JA, LANG_COUNT };
 
 typedef struct Settings {
     /* video */
     bool fullscreen;
-    bool widescreen;       /* experimental: show more of the level on wide screens (off by default) */
+    bool vsync;            /* show each frame on the screen's refresh (no tearing) */
     int aspect;            /* ASPECT_* */
     int scaling;           /* SCALE_*: fit the screen, or whole multiples only */
     int filter;            /* FILTER_* */
+    int effect;            /* EFFECT_*: scanlines, a CRT (flat or curved), composite */
+    int effect_strength;   /* STRENGTH_* */
     int sides;             /* SIDES_*: what fills a wide screen beside the picture */
     /* gameplay */
     int skip;              /* SKIP_*: story cinematics */

@@ -148,29 +148,74 @@ ends works, 14 is too late; measured with `rondo_headless --press`).
 
 Controls (`binds.c`): the actions the player can rebind (Jump, Attack, Sub-weapon, Item Crash,
 Backflip, Run, Pause, Menu, Rewind, Save state, Load state), each with a controller button
-(SDL gamepad button, or the triggers as `BIND_LT` / `BIND_RT`) and a key (scancode), kept in
+(SDL gamepad button, the triggers as `BIND_LT` / `BIND_RT`, or a combination of two,
+`BIND_COMBO(hold, press)`: Back + RB) and a key (scancode), kept in
 `Settings.bind_pad` / `bind_key` and settings.ini (`bind_pad_jump = 0` ...). `bind_assign`
-swaps with the action that had the control, clears an action's own control where the game
-can do without it, and refuses moving controls, Esc, F6 / F7 and F11. `input.c` reads every
+swaps with the action that had the control, leaves an action given its own control as it
+was, and refuses moving controls, Esc, F6 / F7 and F11; `bind_clear` (X / Delete on a row:
+`NAV_CLEAR_PAD` / `NAV_CLEAR_KEY`) leaves an action without one where the game can do without
+it. `input.c` reads every
 action through them (`input_held`, `input_pressed`; a trigger is pressed past half way and
-let go below a quarter); moving and the menus' own navigation stay fixed. On the Controls page
-a row waits for the next button, trigger or key (`menu_capture`; Esc, a click or 5 s leaves
-it). The features test checks the rules (`bind_check`) and photographs a row waiting.
+let go below a quarter); moving and the menus' own navigation stay fixed. A combination is
+pressed when its second button goes down while the first is held; that second button is then
+"swallowed" (not its own action) until let go, and a button that starts any combination gives
+its own press-type action (Menu, Save / Load state) on release, only if no combination used it
+(`Input.armed`; opening or closing the menu forgets it). Held actions on such a button (game
+buttons, run, rewind) still start at once. On the Controls page choosing a row counts down
+from 5 (`menu_capture` follows what is held, in the order pressed; `menu_update` ends the
+count): the buttons held at the end become the control (two: a combination, the first pressed
+held first; three or more are refused), else a key held, else whatever was last pressed
+together. Esc or a click leaves it. The features test checks the rules (`bind_check`), drives
+an SDL virtual controller through Back + RB / Back + LB, Back alone and the shared RB / LB
+(`input_check`), and feeds the count held buttons, a tap, a key, three buttons and nothing,
+with photographs of it counting.
 
 Modules: `input.c` (mapping, macros, menu navigation), `menu.c` (pages, persisted to
 `settings.ini` by `settings.c`), `video.c` (placement and filtering), `game.c` (what the
-frontend knows about the game: main state, cheats, run), `wide.c` (widescreen); the last two
-are also linked into `rondo_headless`.
+frontend knows about the game: main state, cheats, run) and `prompt.c` (the title's prompt);
+the last two are also linked into `rondo_headless`.
 
 Video: aspect 4:3 / square pixels / stretch, fit or whole multiples, filters Sharp (nearest
 upscale to a whole factor into a render target, then linear to the final size), Nearest and
 Smooth. On wide screens the sides show the picture blurred (downscaled to 16x14, scaled up
 linearly, dimmed). The window is high-DPI aware, so fullscreen renders at the display's
-native resolution (e.g. 3840x2160). Frames are paced at 59.83 Hz.
+native resolution (e.g. 3840x2160). Frames are paced at 59.83 Hz by the frame timer. VSync
+(on by default; `set_vsync`, `SDL_SetRenderVSync` 1, adaptive if that is refused) shows each
+on the screen's refresh, so it never tears; the timer still sets the pace, so on a 60 Hz
+screen about one frame in 350 is shown twice. Test runs turn it off to run uncapped.
+`rondo.log` records the renderer and whether VSync is on.
+
+Screen effects (`video.c`, `draw_effect`; Off by default): passes of the ordinary renderer,
+no shaders. The picture is drawn at its size on screen into a render target, softened
+sideways for Composite (four shifted copies blended in turn), drawn again added at a fraction
+to make up for the darkening, and multiplied (`SDL_BLENDMODE_MOD`) by a scanline profile: a
+1-pixel-wide texture with the brightness of every screen row, 1 - depth * cos^4 across each
+game line, averaged over 8 points per row so lines come out even at any scale. The target
+then goes on the screen, flat or for Curved CRT on a 48 x 36 mesh bowed outward (x scaled by
+1 - k y^2, y by 1 - k x^2), under an aperture grille (a 3 x 1 RGB texture tiled at the
+screen's own pixels, doubled from 1600 rows, multiplied), a glow (the picture downscaled to
+128 x 112 and 64 x 56, added) and a vignette. Geometry takes its alpha from the vertices, not
+the texture's alpha mod, so the mesh passes put it there. Each effect is set to keep the
+picture's average brightness within about 6% of the plain picture; each costs under 0.4 ms
+a frame at 1080p. Effect strength scales them by 0.6 / 1 / 1.4. The features test takes a
+screenshot of each.
 
 Cinematic skip: story scenes run in main state `$0A` (RUN does not skip them in the game).
 Skipping runs the emulation at full speed, silently, until the state changes (the 3,566-frame
 Stage 0 scene takes under a second), then records one rewind step across the whole scene.
+
+The logo and the intro use the game's own skip instead (bank `$6B`, the overlay at `$8000`):
+the logo (state `$00`) ends early on a new RUN press when `$3F83` and `$3F84` are both set,
+with `$37 = $FF`, which sends state `$02` to sub-state `$03` (the title screen's script)
+past the intro; the intro (state `$02` sub-state `$01`) goes to the title on a new RUN press
+when `$3F83` is set. The game sets `$3F84` at the end of the logo and `$3F83` at the end of
+the intro (and in the logo's first step when the backup RAM check at `$40E7` returns 0), so
+on a first power-on START does nothing until both have been shown. Unless Skip cinematics is
+Never, the frontend sets both flags during the logo and intro (`game_allow_power_on_skip`),
+and Start, Jump or Attack (or Play on the start screen, or Automatically) makes it press RUN
+for the game every 8 frames where it looks (`game_power_on_skippable`) until the title screen
+is up: about 0.3 s from power-on. The title screen is silent either way; the game starts its
+attract sequence about 14 s later.
 
 Cheats (`game.c`): health losses are undone while playing (state `$05`); hearts are kept at
 99 while playing, unless they drop more than 12 times a second (a tally), then left alone
@@ -196,64 +241,35 @@ picture in the game's own letters, cut from those sprites' patterns in VRAM, wit
 and Y drawn in the same style in `prompt.c`. Its colours come from the palette as it is, so
 it fades with the title. No game graphics are kept in the source.
 
-Going from 4:3 to wide, `main.c` uploads the picture cropped to the columns it shows each
-side, easing towards what the frame has (9% of the rest a frame: about half a second), so the
-picture grows out of the 4:3 one; going back is at once. The features test logs how long it
-took.
-
-Widescreen (`wide.c`, `runtime/pce/video.c`; an experimental option, off by default:
-`experimental_widescreen` in settings.ini): the VDC renders `vdc.wide` extra pixels on
-each side of a 256-pixel picture (background from the 512-pixel map, sprites with 10-bit X
-past 512 read as negative); `video.c` keeps the 4:3 pixel shape for the wider picture. The
-game is changed by byte patches, each checked against the original bytes (code is loaded
-from the disc as the game goes): background columns are streamed 112 px out instead of 64
-(and drawn at both distances, because some layers start drawn to 64 only), the room start
-draws all 16 columns, rows drawn while scrolling vertically cover the whole map, objects
-spawn 128 px out instead of 64, keep moving to 128 px and are removed past 192 px, and the
-sprite builder lets pieces through from -112 to 256 + 112. Generators fixed to the screen at
-the old spawn edge are moved to the new one; the HUD object moves to the left edge. The
-world changes are decided as each room starts (a dispatch hook on the room-start routines):
-on for rooms whose camera limits allow sideways scrolling, off for all others, whose
-background map may be shared between layers (the Stage 0 carriage chase is drawn wide with
-no changes: its scenery layers loop round the whole map). Areas beyond a room's walls are
-drawn black (`vdc.wide_x0/x1`). The sprite changes follow each frame's wide/4:3 choice.
-
-Parked things (the Prologue's carriage): in a one-screen room drawn wide over its looping
-scenery, a band of rows (rows drawn with the same X scroll in this frame and the last; the
-renderer records each row's scroll, `vdc_row_scroll`, outside the machine state) that stands
-still for 20 frames with nothing in its original 256 pixels holds something the game parked
-in the part of its 512-pixel map those pixels do not show. That band is cut to the original
-256 pixels (`vdc_set_row_clip`, both sides), and objects standing still off the left (screen
-X < 0, unchanged for 20 frames, not the HUD) are marked in a table in bank `$00` (`$FE80` +
-slot) that the sprite builder's checks consult: their pieces left of the screen are
-dropped, as the 4:3 game drops them. When the band moves again the thing is coming in from
-the left: only the right side is cut (where the map wraps round to its rear), until the
-band's background has come in clear of the picture's left edge (at 21:9 the picture shows
-480 of the map's 512 pixels).
-
 Start screen (`menu.c` page `PAGE_START`, the in-game menu's root swapped for one with Play
 at the top; the option pages return to whichever root opened them): shown when rondo.exe
 starts unless `--play` or the Start screen option is off. The game is loaded but does not
-run behind it (no picture, no sound); Play starts it from power-on and fast-forwards to the
-title screen (unless Skip cinematics is Never), Load state loads into it.
+run behind it (no picture, no sound); Play starts it from power-on and goes straight to the
+title screen with the game's own skip (unless Skip cinematics is Never), Load state loads
+into it.
 
-The look (`theme.c`; laid out after the Metroid: Other M port's menus, gothic in
-Castlevania's colours): panels are dark burgundy frames with a pointed-arch top, a gold
-border and inner line, pinnacles at the arch's feet and a cross on its apex; dividers carry
-diamonds and a cross; the selected row is a bar of blood-red with a gold cross for a cursor;
-notices are plaques with pointed ends. The emblem is a rose window. The start screen is a
-night sky with a blood moon, drifting clouds and bats over the castle's skyline with
-candle-lit windows, the title beside the menu panel. Each page has a help line per item and
+The look (`theme.c`; laid out after the Metroid: Other M port's menus, gothic, by candlelight
+and moonlight, red kept to small rubies): panels are dark umber frames with a pointed-arch
+top letting in pale moonlight, warmer towards the bottom, a gold border and inner line,
+pinnacles at the arch's feet and a cross on its apex; dividers carry diamonds and a cross;
+the selected row is a bar of candlelight with a gold cross for a cursor; notices are plaques
+with pointed ends. The emblem is a rose window of blue and indigo glass lit by a candle
+behind it. The start screen is a town at night: a deep blue sky, a pale moon high on the
+left whose beams slant down onto the town, thin clouds and bats; a castle on a hill and the
+town's rear rows in a cool mist; the town's warm glow; then the near row of houses (moonlit
+roof edges, chimneys), a church with a lit belfry and street lanterns, the windows lit by
+candles that flicker. Lights are added (`SDL_BLENDMODE_ADD`) as soft radial glows. The
+title is beside the menu panel. Each page has a help line per item and
 the buttons in the footer; panels are sized to their rows and open out when shown. All drawn
 with SDL's renderer (`SDL_RenderGeometry`); text rasterised by stb_truetype (`stb_truetype.h`,
 public domain) into glyph atlases per size, in fonts built into rondo.exe (`ui_fonts.c`,
 generated by `tools/fonts/make_ui_fonts.py`; SIL OFL 1.1): Cinzel for menu text, Cinzel
 Decorative for capitals, UnifrakturMaguntia (blackletter) for titles. Windows' fonts, then
 SDL's debug font, stand in if one cannot be read.
-Cinematic skipping (START, or automatic) covers the story scenes (state `$0A`) and the
-power-on intro (state `$02`, sub-states `$00`-`$01`: the narration and animated opening, about
-1:55 on both discs, during which the game itself ignores START); the intro is run with no
-buttons pressed, so the title screen (`$02`/`$02`) is not passed by.
+Skip cinematics (START, or automatic) runs the story scenes (state `$0A`) fast; the logo and
+the power-on intro (state `$02`, sub-states `$00`-`$01`: the narration and animated opening,
+about 1:55 on both discs) use the game's own skip (above). Only the features test still runs
+the intro fast, frame for frame, because its recorded input is tied to frame numbers.
 START / F1 plays, Back does nothing there. The mouse works on every menu page
 (`menu_item_at`, sharing the layout with `menu_draw`); the pointer is hidden while playing.
 
@@ -262,8 +278,9 @@ DIR` (plays the capture script with automatic skipping and all cheats, uncapped;
 screenshots of the video modes, menu pages and start screen to DIR; checks the start
 screen's keys and mouse layout; switches language at the end) and `rondo.exe
 --autotest-start` (the start screen for 600 frames, checking the game waits behind it, a
-mouse click on Play sent through the event queue, the title screen reached; then START
-pressed during the intro skipping it). All log to `rondo.log` and
+mouse click on Play sent through the event queue, the title screen reached; then Jump
+pressed during the intro skipping it, and Automatically from power-on, each by the game's
+own skip with nothing run fast). All log to `rondo.log` and
 keep their files in a `test` folder, never touching the player's saves. Their window
 cannot take the keyboard focus, and they ignore real keyboard, mouse and controller input
 (events and polled state alike): only the input events a test sends itself, marked with
@@ -288,9 +305,9 @@ work-RAM bytes whenever one changes), `--poke ADDR=VAL` (write before every fram
 `--save-state FRAME:FILE` / `--load-state FILE` (start later runs mid-game), `--dump-ram
 FRAME:FILE`, `--ram-trace FILE` (work RAM + pad after every frame, for offline searches),
 `--cheats health,hearts,lives,maria,play-maria` and `--skip-cinematics` (the frontend's
-`game.c`), `--run FRAME:LEN` (hold the run button), `--wide N` (widescreen, N pixels a side),
-`--wide-report FRAME` (which widescreen patches are in), `--prompt pad|keys` (the title's
-prompt as rondo.exe shows it), `--write-watch ADDR,...` (which
+`game.c`), `--run FRAME:LEN` (hold the run button), `--prompt pad|keys` (the title's
+prompt as rondo.exe shows it), `--row-scroll A:B` (each frame's bands of rows by X scroll),
+`--write-watch ADDR,...` (which
 instruction changes those work-RAM bytes; interpreter), `--vram-watch LO:HI` (which
 instructions write that VRAM range), `--dump-mem FRAME:FILE` (all 256 banks + MPRs, for
 disassembly), `--dump-vram FRAME:FILE`, `--dump-adpcm FRAME:FILE` (the 64 KiB of ADPCM RAM), `--dump-sat FRAME` (sprite table), `--scroll-log FILE`
@@ -308,6 +325,17 @@ menu all render and run; menu input works. `--wav FILE` records the audio output
   handler checks the raster flag first and takes a raster-only path when it is set. If a raster
   match is latched while raster interrupts are disabled, it arrives together with vblank and the
   frame logic never runs again (the game froze on the logo before this was fixed).
+- **The raster counter keeps counting below the picture, and the raster interrupt on the
+  first line after it comes before vblank.** The counter is `$40` on the picture's first line
+  and counts every line until the next picture starts, so a compare of `$40` + the picture's
+  height matches the first line of vertical blank. Rondo's water areas (the Stage 1 ferry)
+  use that: a raster split at the water line (69:47E2, effect 8 of the table at 69:44E9)
+  saves sprite palette 0 (Richter's) and fills it with blue for his reflection, and sets
+  RCR `$121` (picture height 225), whose interrupt restores it (69:477D). The handler reads
+  the status once and handles one cause, so vblank (`vdc_vblank`, with the SATB DMA) is
+  raised half a line later than the compare (`pce_run_frame`). Before this, compares stopped
+  at the picture's end: the restore never ran, the next frame saved the blue palette, and
+  Richter stayed a blue silhouette for the rest of the area.
 - Rondo never uses the timer: its timer handler is a bare `RTI`. The System Card leaves the
   timer stopped after reset (checked by running the original reset code with `--bios-reset`).
 - Input arrives through the System Card's `EX_JOYSNS` variables (`$2228` held, `$222D` newly

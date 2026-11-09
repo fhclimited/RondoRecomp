@@ -28,7 +28,7 @@
 #include "../recomp/gen.h"
 #include "zip.h"
 
-#define SETUP_VERSION "0.12"
+#define SETUP_VERSION "0.13"
 
 /* ---- output hooks (stdout for the command line; the GUI installs its own) ------------- */
 

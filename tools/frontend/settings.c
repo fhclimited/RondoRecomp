@@ -11,7 +11,10 @@ void settings_default(Settings *s)
     s->aspect = ASPECT_4_3;
     s->scaling = SCALE_FIT;
     s->filter = FILTER_SHARP;
+    s->effect = EFFECT_OFF;
+    s->effect_strength = STRENGTH_MEDIUM;
     s->sides = SIDES_BLUR;
+    s->vsync = true;
     s->skip = SKIP_START;
     s->rewind = true;
     s->volume = 10;
@@ -40,12 +43,12 @@ void settings_load(Settings *s, const char *path)
         while (*val == ' ') val++;
         int n = atoi(val);
         if (!strcmp(key, "fullscreen")) s->fullscreen = n != 0;
+        else if (!strcmp(key, "vsync")) s->vsync = n != 0;
         else if (!strcmp(key, "aspect")) s->aspect = clampi(n, 0, ASPECT_COUNT - 1);
-        /* widescreen is experimental and off unless chosen: the old "widescreen" key (on by
-         * default before 0.11) is not read */
-        else if (!strcmp(key, "experimental_widescreen")) s->widescreen = n != 0;
         else if (!strcmp(key, "scaling")) s->scaling = clampi(n, 0, SCALE_COUNT - 1);
         else if (!strcmp(key, "filter")) s->filter = clampi(n, 0, FILTER_COUNT - 1);
+        else if (!strcmp(key, "screen_effect")) s->effect = clampi(n, 0, EFFECT_COUNT - 1);
+        else if (!strcmp(key, "effect_strength")) s->effect_strength = clampi(n, 0, STRENGTH_COUNT - 1);
         else if (!strcmp(key, "sides")) s->sides = clampi(n, 0, SIDES_COUNT - 1);
         else if (!strcmp(key, "skip_cinematics")) s->skip = clampi(n, 0, SKIP_COUNT - 1);
         else if (!strcmp(key, "rewind")) s->rewind = n != 0;
@@ -64,7 +67,7 @@ void settings_load(Settings *s, const char *path)
             bool pad = key[5] == 'p';
             for (int a = 0; a < ACT_COUNT; a++)
                 if (!strcmp(key + 9, bind_action(a)->key)) {
-                    if (pad) s->bind_pad[a] = (n >= 0 && n < 64) || n == BIND_LT || n == BIND_RT ? n : BIND_NONE;
+                    if (pad) s->bind_pad[a] = bind_pad_valid(n) ? n : BIND_NONE;
                     else s->bind_key[a] = n > 0 && n < 512 ? n : 0;
                 }
         }
@@ -78,12 +81,13 @@ bool settings_save(const Settings *s, const char *path)
     if (!f) return false;
     fprintf(f,
             "# Rondo Recomp options (also changed from the in-game menu: F1 / Back)\n"
-            "fullscreen = %d\nexperimental_widescreen = %d\naspect = %d\nscaling = %d\nfilter = %d\nsides = %d\n"
+            "fullscreen = %d\nvsync = %d\naspect = %d\nscaling = %d\nfilter = %d\nscreen_effect = %d\n"
+            "effect_strength = %d\nsides = %d\n"
             "skip_cinematics = %d\nrewind = %d\nvolume = %d\nslot = %d\nstart_screen = %d\n"
             "cheat_health = %d\ncheat_hearts = %d\ncheat_lives = %d\n"
             "maria_unlocked = %d\nplay_maria = %d\n"
             "language = %d\ndisc_ja = %s\ndisc_en = %s\n",
-            s->fullscreen, s->widescreen, s->aspect, s->scaling, s->filter, s->sides,
+            s->fullscreen, s->vsync, s->aspect, s->scaling, s->filter, s->effect, s->effect_strength, s->sides,
             s->skip, s->rewind, s->volume, s->slot, s->start_screen,
             s->cheat_health, s->cheat_hearts, s->cheat_lives,
             s->maria_unlocked, s->play_maria,

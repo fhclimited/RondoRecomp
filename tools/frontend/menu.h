@@ -32,8 +32,12 @@ typedef struct Menu {
     char status[160];      /* one line at the bottom (e.g. "State 3 saved") */
     char info[2][96];      /* start screen: lines under the title (the disc, the languages) */
     Uint64 opened_ms;      /* when it opened: the panel opens out */
-    int capturing;         /* Controls page: 1 + the action waiting for a button or key, 0 none */
-    Uint64 capture_until;  /* ...until then (ms), when it gives up */
+    int capturing;         /* Controls page: 1 + the action counting down to its new control, 0 none */
+    Uint64 capture_until;  /* ...when the count ends (ms) */
+    int held[8], n_held;   /* controller buttons / triggers held since it began, in the order pressed */
+    int last[8], n_last;   /* the last ones down together (for buttons let go before the end) */
+    int held_key, last_key;    /* a key held now / the last one pressed, 0 none */
+    bool key_after;        /* the last press was a key */
 } Menu;
 
 void menu_open(Menu *m);
@@ -41,13 +45,15 @@ void menu_open_start_screen(Menu *m);
 bool menu_on_start_screen(const Menu *m);   /* open as the start screen (any of its pages) */
 MenuResult menu_nav(Menu *m, Settings *s, Nav nav);
 void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren);
-/* Controls page: an action waits for its new control (choosing one of its rows). While it
- * does, every event goes to menu_capture: the next button, trigger or key is the action's
- * (Esc, a mouse click or 5 s without one leaves it as it was). MENU_SETTINGS_CHANGED when a
- * control changed. menu_update gives up the wait when its time is over. */
+/* Controls page: choosing an action's row counts down from 5, and what is held when the count
+ * ends becomes its control: one controller button or trigger, two (Back + RB: the first
+ * pressed is the one held), or a key. With nothing held then, the last ones pressed together
+ * (or the last key) count. While it counts, every event goes to menu_capture; Esc or a mouse
+ * click leaves the control as it was. menu_update ends the count: MENU_SETTINGS_CHANGED when
+ * a control changed. */
 bool menu_capturing(const Menu *m);
 MenuResult menu_capture(Menu *m, Settings *s, const Input *in, const SDL_Event *ev);
-void menu_update(Menu *m);
+MenuResult menu_update(Menu *m, Settings *s);
 
 /* Mouse, in render coordinates: the item under (x, y) or -1; moving over an item selects
  * it; clicking chooses it (a choice steps to its next value). */

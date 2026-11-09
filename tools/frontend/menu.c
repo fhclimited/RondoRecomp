@@ -28,7 +28,8 @@ static const char *const OFF_ON[] = {"Off", "On"};
 static const char *const ASPECTS[] = {"4:3 (TV)", "Square pixels", "Stretch to fill"};
 static const char *const FILTERS[] = {"Sharp", "Nearest", "Smooth"};
 static const char *const SIDES[] = {"Blurred picture", "Black"};
-static const char *const WIDES[] = {"Off (4:3)", "More of the level"};
+static const char *const EFFECTS[] = {"Off", "Scanlines", "CRT", "Curved CRT", "Composite"};
+static const char *const EFFECT_STRENGTHS[] = {"Light", "Medium", "Strong"};
 static const char *const SCALINGS[] = {"Fit screen", "Whole multiples"};
 static const char *const SKIPS[] = {"Press START", "Automatically", "Never"};
 static const char *const LANGS[] = {"English patch", "Japanese original"};
@@ -41,7 +42,6 @@ static const char *const VOLUMES[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8
 #define F_BOOL(x) _Generic(((Settings *)0)->x, bool: offsetof(Settings, x))
 #define CHOICE(lbl, fld, arr, base, chg) {IT_CHOICE, lbl, 0, F_INT(fld), arr, (int)(sizeof arr / sizeof arr[0]), base, chg}
 #define TOGGLE(lbl, fld, chg) {IT_TOGGLE, lbl, 0, F_BOOL(fld), OFF_ON, 2, 0, chg}
-#define TOGGLE_NAMED(lbl, fld, arr, chg) {IT_TOGGLE, lbl, 0, F_BOOL(fld), arr, 2, 0, chg}
 #define BIND(lbl, act) {IT_BIND, lbl, act, 0, NULL, 0, 0, 0}
 
 static const Item MAIN_ITEMS[] = {
@@ -72,10 +72,12 @@ static const Item START_ITEMS[] = {
 };
 static const Item VIDEO_ITEMS[] = {
     TOGGLE("Fullscreen", fullscreen, MENU_VIDEO_CHANGED),
-    TOGGLE_NAMED("Widescreen (experimental)", widescreen, WIDES, MENU_SETTINGS_CHANGED),
+    TOGGLE("VSync", vsync, MENU_VIDEO_CHANGED),
     CHOICE("Aspect ratio", aspect, ASPECTS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Size", scaling, SCALINGS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Filter", filter, FILTERS, 0, MENU_SETTINGS_CHANGED),
+    CHOICE("Screen effect", effect, EFFECTS, 0, MENU_SETTINGS_CHANGED),
+    CHOICE("Effect strength", effect_strength, EFFECT_STRENGTHS, 0, MENU_SETTINGS_CHANGED),
     CHOICE("Beside the picture", sides, SIDES, 0, MENU_SETTINGS_CHANGED),
     {IT_BACK, "Back", 0, 0, NULL, 0, 0, 0},
 };
@@ -130,7 +132,7 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Language", "The English patch (fan translation) or the Japanese original: each is its own disc."},
     {"Load state", "Continue from the save state in the slot below."},
     {"State slot", "Which of the nine save-state slots to use (F6 / F7 in the game)."},
-    {"Video", "Fullscreen, the picture's shape, size and filter; experimental widescreen."},
+    {"Video", "Fullscreen, the picture's shape, size, filter and screen effect."},
     {"Gameplay", "Story scenes, rewind, volume and the start screen."},
     {"Cheats", "Infinite health, hearts and lives; Maria."},
     {"Controls", "The buttons and keys: change any of them."},
@@ -141,12 +143,14 @@ static const struct { const char *label, *help; } HELP[] = {
     {"Reset game", "Restart the game from power-on."},
     {"Start screen", "Leave the game for the start screen."},
     {"Fullscreen", "Use the whole screen at its own resolution (F11)."},
-    {"Widescreen (experimental)", "More of the level on wide screens. Experimental: expect graphical glitches."},
+    {"VSync", "Show each frame when the screen refreshes: no tearing. Off: at once, maybe torn."},
     {"Aspect ratio", "4:3 as on a TV, square pixels, or stretched to fill."},
     {"Size", "As big as the screen allows, or whole multiples only."},
     {"Filter", "Sharp: crisp, even pixels. Nearest: raw. Smooth: softened."},
+    {"Screen effect", "Scanlines, a CRT's glow and phosphors (flat or curved glass), or a soft composite TV."},
+    {"Effect strength", "How strong the screen effect is."},
     {"Beside the picture", "What fills the screen beside a narrower picture."},
-    {"Skip cinematics", "Story scenes and the intro: Pause (START) skips them, or they are skipped."},
+    {"Skip cinematics", "Logo and intro: START, A or X goes to the title screen. Story scenes: START runs them fast."},
     {"Rewind", "Hold the Rewind control (LT / R unless changed) to play the game backwards."},
     {"Reset controls", "Every button and key back to its default."},
     {"Volume", "Sound volume."},
@@ -246,7 +250,9 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
         case IT_BIND:
             m->capturing = it->arg + 1;
             m->capture_until = SDL_GetTicks() + 5000;
-            m->status[0] = 0;
+            m->n_held = m->n_last = m->held_key = m->last_key = 0;
+            m->key_after = false;
+            snprintf(m->status, sizeof m->status, "Hold its button, two buttons (Back, then RB) or key until the count ends.");
             return MENU_NOTHING;
         case IT_PAGE: m->page = it->arg; m->sel[m->page] = first_selectable(m->page); return MENU_NOTHING;
         case IT_BACK: m->page = parent_of(m, m->page); return MENU_NOTHING;
@@ -257,6 +263,14 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
     case NAV_BACK:
         if (PAGES[m->page].parent >= 0) m->page = parent_of(m, m->page);
         else if (m->root != PAGE_START) return MENU_CLOSE;    /* the start screen stays */
+        return MENU_NOTHING;
+    case NAV_CLEAR_PAD:       /* X / Delete: a control's controller button / key */
+    case NAV_CLEAR_KEY:
+        if (it->kind == IT_BIND) {
+            const char *msg = bind_clear(s->bind_pad, s->bind_key, it->arg, nav == NAV_CLEAR_PAD);
+            snprintf(m->status, sizeof m->status, "%s", msg);
+            return MENU_SETTINGS_CHANGED;
+        }
         return MENU_NOTHING;
     case NAV_MENU:            /* START / F1: on the start screen, play */
         if (m->root != PAGE_START) return MENU_CLOSE;
@@ -270,16 +284,56 @@ MenuResult menu_nav(Menu *m, Settings *s, Nav nav)
 
 bool menu_capturing(const Menu *m) { return m->open && m->capturing > 0; }
 
-void menu_update(Menu *m)
+/* What the count would give now: CAPTURED and the control (*is_pad: a controller binding,
+ * else a key), CAPTURED_NOTHING, or CAPTURED_TOO_MANY (three buttons or more). Buttons held
+ * win, then a key held, then whatever was pressed last. */
+enum { CAPTURED_NOTHING, CAPTURED, CAPTURED_TOO_MANY };
+
+static int buttons_binding(const int *b, int n, int *value)
 {
-    if (m->capturing && SDL_GetTicks() >= m->capture_until) {
-        m->capturing = 0;
-        snprintf(m->status, sizeof m->status, "Nothing pressed: left as it was.");
+    if (n > 2) return CAPTURED_TOO_MANY;
+    *value = n == 2 ? BIND_COMBO(b[0], b[1]) : b[0];   /* the first pressed is the one held */
+    return CAPTURED;
+}
+
+static int captured(const Menu *m, bool *is_pad, int *value)
+{
+    *is_pad = true;
+    if (m->n_held) return buttons_binding(m->held, m->n_held, value);
+    *is_pad = false;
+    *value = m->held_key ? m->held_key : m->last_key;
+    if (m->held_key || (m->key_after && m->last_key)) return CAPTURED;
+    *is_pad = true;
+    if (m->n_last) return buttons_binding(m->last, m->n_last, value);
+    return CAPTURED_NOTHING;
+}
+
+MenuResult menu_update(Menu *m, Settings *s)
+{
+    if (!m->capturing || SDL_GetTicks() < m->capture_until) return MENU_NOTHING;
+    int act = m->capturing - 1;
+    m->capturing = 0;
+    bool is_pad;
+    int v, got = captured(m, &is_pad, &v);
+    if (got != CAPTURED) {
+        snprintf(m->status, sizeof m->status, got == CAPTURED_TOO_MANY ? "Two buttons at most: %s left as it was."
+                                                                       : "Nothing held: %s left as it was.",
+                 bind_action(act)->name);
+        return MENU_NOTHING;
     }
+    int before_pad[ACT_COUNT], before_key[ACT_COUNT];
+    memcpy(before_pad, s->bind_pad, sizeof before_pad);
+    memcpy(before_key, s->bind_key, sizeof before_key);
+    const char *msg = bind_assign(s->bind_pad, s->bind_key, act, is_pad, v);
+    snprintf(m->status, sizeof m->status, "%s", msg ? msg : "");
+    return memcmp(before_pad, s->bind_pad, sizeof before_pad) || memcmp(before_key, s->bind_key, sizeof before_key)
+               ? MENU_SETTINGS_CHANGED
+               : MENU_NOTHING;
 }
 
 MenuResult menu_capture(Menu *m, Settings *s, const Input *in, const SDL_Event *ev)
 {
+    (void)s;
     if (!m->capturing) return MENU_NOTHING;
     int act = m->capturing - 1;
     if (ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
@@ -288,31 +342,48 @@ MenuResult menu_capture(Menu *m, Settings *s, const Input *in, const SDL_Event *
         snprintf(m->status, sizeof m->status, "%s: left as it was.", bind_action(act)->name);
         return MENU_NOTHING;
     }
-    bool is_pad;
+    /* follow what is held (from the start of the count: the A that chose the row is not) */
+    bool down;
     int v;
-    if (!input_control_of(in, ev, &is_pad, &v)) return MENU_NOTHING;
-    int before_pad[ACT_COUNT], before_key[ACT_COUNT];
-    memcpy(before_pad, s->bind_pad, sizeof before_pad);
-    memcpy(before_key, s->bind_key, sizeof before_key);
-    const char *msg = bind_assign(s->bind_pad, s->bind_key, act, is_pad, v);
-    bool reserved = is_pad ? bind_pad_reserved(v) : bind_key_reserved(v);
-    snprintf(m->status, sizeof m->status, "%s", msg ? msg : "");
-    if (reserved) {                                 /* keep waiting for another */
-        m->capture_until = SDL_GetTicks() + 5000;
-        return MENU_NOTHING;
+    if (input_pad_event(in, ev, &v, &down)) {
+        int i = 0;
+        while (i < m->n_held && m->held[i] != v) i++;
+        if (!down) {                                   /* let go: out of the held ones */
+            if (i < m->n_held) {
+                memmove(&m->held[i], &m->held[i + 1], (size_t)(m->n_held - i - 1) * sizeof m->held[0]);
+                m->n_held--;
+            }
+        } else if (bind_pad_reserved(v)) {
+            snprintf(m->status, sizeof m->status, "%s is kept for %s.", bind_pad_name(v),
+                     v == SDL_GAMEPAD_BUTTON_GUIDE ? "the system" : "moving");
+        } else if (i == m->n_held && m->n_held < (int)(sizeof m->held / sizeof m->held[0])) {
+            m->held[m->n_held++] = v;
+            memcpy(m->last, m->held, sizeof m->last);
+            m->n_last = m->n_held;
+            m->key_after = false;
+        }
+    } else if (ev->type == SDL_EVENT_KEY_DOWN && !ev->key.repeat) {
+        int k = ev->key.scancode;
+        if (bind_key_reserved(k)) {
+            snprintf(m->status, sizeof m->status, "%s is kept for %s.", bind_key_name(k),
+                     k == SDL_SCANCODE_F6 || k == SDL_SCANCODE_F7 ? "the state slot"
+                     : k == SDL_SCANCODE_F11 ? "fullscreen" : "moving");
+        } else {
+            m->held_key = m->last_key = k;
+            m->key_after = true;
+        }
+    } else if (ev->type == SDL_EVENT_KEY_UP && (int)ev->key.scancode == m->held_key) {
+        m->held_key = 0;
     }
-    m->capturing = 0;
-    return memcmp(before_pad, s->bind_pad, sizeof before_pad) || memcmp(before_key, s->bind_key, sizeof before_key)
-               ? MENU_SETTINGS_CHANGED
-               : MENU_NOTHING;
+    return MENU_NOTHING;
 }
 
 static const char *item_help(int page, const Item *it)
 {
     if (it->kind == IT_BIND)
         return bind_action(it->arg)->clearable
-                   ? "A / Enter, then the button or key for it. One in use swaps over; its own again clears it."
-                   : "A / Enter, then the button or key for it. One in use swaps over.";
+                   ? "A / Enter, then hold its button (or two) or key until the count ends. X / Delete clears it."
+                   : "A / Enter, then hold its button (or two) or key until the count ends. One in use swaps over.";
     if (page == PAGE_CONTROLS && it->kind == IT_BACK)
         return "Sub-weapon is also Up + Attack, Backflip is Jump twice: the original inputs work too.";
     for (size_t i = 0; i < sizeof HELP / sizeof HELP[0]; i++)
@@ -405,7 +476,7 @@ static void draw_header(SDL_Renderer *ren, const Frame *F, const char *title, bo
 {
     float u = F->u, mx = (F->x0 + F->x1) * 0.5f;
     th_text(ren, TH_FONT_TITLE, 34 * u, mx, F->title_y, th_fade(TH_TEXT, a), title, 0.5f, 0.5f, 1 * u,
-            th_fade(th_alpha(TH_CRIMSON, 120), a));
+            th_fade(th_alpha(TH_EMBER, 150), a));
     if (game_line)
         th_text(ren, TH_FONT_UI, 10.5f * u, mx, F->sub_y, th_fade(TH_GOLD, a), "CASTLEVANIA  -  RONDO OF BLOOD", 0.5f,
                 0.5f, 3 * u, TH_NONE);
@@ -444,9 +515,9 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
         bool sel = i == m->sel[m->page] && selectable(it);
         bool action = it->kind == IT_ACTION || it->kind == IT_PAGE || it->kind == IT_BACK;
         if (sel) {
-            /* a bar of blood fading to the right between gold hairlines, a cross for a cursor */
-            th_rect_h(ren, F->x0 + 16 * u, y - half, F->x1 - 16 * u, y + half, th_fade(th_alpha(TH_CRIMSON, 150), a),
-                      th_fade(th_alpha(TH_CRIMSON, 8), a));
+            /* a bar of candlelight fading to the right between gold hairlines, a cross for a cursor */
+            th_rect_h(ren, F->x0 + 16 * u, y - half, F->x1 - 16 * u, y + half, th_fade(th_alpha(TH_CANDLE, 110), a),
+                      th_fade(th_alpha(TH_CANDLE, 6), a));
             th_rect_h(ren, F->x0 + 16 * u, y - half, F->x1 - 16 * u, y - half + 1.0f, th_fade(th_alpha(TH_GOLD, 150), a),
                       th_fade(th_alpha(TH_GOLD, 0), a));
             th_rect_h(ren, F->x0 + 16 * u, y + half - 1.0f, F->x1 - 16 * u, y + half, th_fade(th_alpha(TH_GOLD, 150), a),
@@ -469,7 +540,13 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
             if (m->capturing == it->arg + 1) {
                 Uint64 now = SDL_GetTicks();
                 int left = m->capture_until > now ? (int)((m->capture_until - now + 999) / 1000) : 0;
-                snprintf(row, sizeof row, "%s\tPress a button or key...  %d", it->label, left);
+                bool is_pad;
+                int v, got = captured(m, &is_pad, &v);   /* what it would take now */
+                snprintf(row, sizeof row, "%s\t%s   %d", it->label,
+                         got == CAPTURED_TOO_MANY ? "Two buttons at most"
+                         : got == CAPTURED        ? (is_pad ? bind_pad_name(v) : bind_key_name(v))
+                                                  : "Hold it now...",
+                         left);
             } else {
                 snprintf(row, sizeof row, "%s\t%s\t%s", it->label, bind_pad_name(s->bind_pad[it->arg]),
                          bind_key_name(s->bind_key[it->arg]));
@@ -485,7 +562,7 @@ static void draw_rows(SDL_Renderer *ren, const Frame *F, const Menu *m, const Se
         float label_w = (F->x1 - F->x0) - (value ? 300 : 110) * u;
         SDL_Color lc = sel ? (SDL_Color){255, 248, 232, 255} : action ? TH_ACTION : TH_TEXT;
         th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, label, label_w, 0), F->x0 + 56 * u, y,
-                th_fade(lc, a), label, 0, 0.5f, 0, sel ? th_fade(th_alpha(TH_CRIMSON, 140), a) : TH_NONE);
+                th_fade(lc, a), label, 0, 0.5f, 0, sel ? th_fade(th_alpha(TH_EMBER, 170), a) : TH_NONE);
         if (value) {
             const char *v = it->choices[get_value(s, it)];
             th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, F->text_px, v, 168 * u, 0), F->x1 - 120 * u, y,
@@ -511,7 +588,7 @@ static void draw_footer(SDL_Renderer *ren, const Frame *F, const Menu *m, float 
     th_text(ren, TH_FONT_UI, th_fit(ren, TH_FONT_UI, 13.5f * u, help, w, 0), mx, F->foot_y + 18 * u,
             th_fade(m->status[0] ? TH_ACTION : TH_TEXT, a), help, 0.5f, 0.5f, 0, TH_NONE);
     const char *hint = m->capturing
-                           ? "PRESS A BUTTON OR KEY     ITS OWN AGAIN  CLEARS     ESC OR WAIT  LEAVE IT"
+                           ? "HOLD THE BUTTONS OR KEY  UNTIL THE COUNT ENDS     ESC  LEAVE IT"
                        : m->page == PAGE_START
                            ? "UP / DOWN  CHOOSE     LEFT / RIGHT  CHANGE     A / ENTER  SELECT     START  PLAY"
                        : m->page == PAGE_MAIN
@@ -530,7 +607,7 @@ static void draw_start_title(SDL_Renderer *ren, const Frame *F, const Menu *m, f
             th_fade(TH_GOLD, a), "CASTLEVANIA", 0.5f, 0.5f, 5 * u, th_fade(th_alpha((SDL_Color){0, 0, 0, 255}, 160), a));
     float tp = th_fit(ren, TH_FONT_TITLE, 66 * u, "Rondo of Blood", 420 * u, 1 * u);
     th_text(ren, TH_FONT_TITLE, tp, x, y + 58 * u, th_fade(TH_TEXT, a), "Rondo of Blood", 0.5f, 0.5f, 1 * u,
-            th_fade(th_alpha(TH_CRIMSON, 150), a));
+            th_fade(th_alpha(TH_EMBER, 190), a));
     th_divider(ren, x - 170 * u, x + 170 * u, y + 102 * u, u, a);
     th_text(ren, TH_FONT_UI, 11 * u, x, y + 122 * u, th_fade(TH_TEXT_DIM, a), "RONDO RECOMP", 0.5f, 0.5f, 5 * u, TH_NONE);
     if (m->info[0][0])
@@ -555,7 +632,7 @@ void menu_draw(const Menu *m, const Settings *s, SDL_Renderer *ren)
         th_backdrop(ren, F.w, F.h, t);              /* the game is not running behind it */
     } else {
         float fw = (float)F.w, fh = (float)F.h;
-        th_rect(ren, 0, 0, fw, fh, (SDL_Color){10, 1, 5, 178});
+        th_rect(ren, 0, 0, fw, fh, (SDL_Color){5, 6, 14, 178});
         th_rect_h(ren, 0, 0, fw * 0.25f, fh, (SDL_Color){0, 0, 0, 120}, (SDL_Color){0, 0, 0, 0});
         th_rect_h(ren, fw * 0.75f, 0, fw, fh, (SDL_Color){0, 0, 0, 0}, (SDL_Color){0, 0, 0, 120});
     }

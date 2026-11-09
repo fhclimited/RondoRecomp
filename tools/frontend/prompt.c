@@ -97,7 +97,7 @@ static void draw_char(const TitlePrompt *t, Pce *p, char ch, int x0)
         if (ORIGINAL[i] == ch) {                 /* the game's own letter */
             for (int y = 0; y < 16; y++)
                 for (int x = 0; x < 8; x++) {
-                    int c = t->cells[i][y][x], fx = d->fb_wide + x0 + x, fy = LINE_Y + y;
+                    int c = t->cells[i][y][x], fx = x0 + x, fy = LINE_Y + y;
                     if (c && fx >= 0 && fx < d->fb_w && fy < d->fb_h) d->fb[fy * PCE_FB_MAX_W + fx] = argb[c];
                 }
             return;
@@ -106,7 +106,7 @@ static void draw_char(const TitlePrompt *t, Pce *p, char ch, int x0)
         if (EXTRA[e].c == ch) {
             for (int y = 0; y < 7; y++)
                 for (int x = 0; x < 8; x++) {
-                    int fx = d->fb_wide + x0 + x, fy = LINE_Y + 8 + y;
+                    int fx = x0 + x, fy = LINE_Y + 8 + y;
                     if (EXTRA[e].rows[y][x] == '#' && fx >= 0 && fx < d->fb_w && fy < d->fb_h)
                         d->fb[fy * PCE_FB_MAX_W + fx] = argb[t->ink];
                 }

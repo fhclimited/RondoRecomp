@@ -28,16 +28,15 @@ Findings so far: [docs/findings.md](docs/findings.md).
 - **Runtime:** HuC6280 interpreter (253/256 opcodes pass every SingleStepTests case), PC Engine
   video, sound (PSG effects, ADPCM voices, CD audio), backup RAM saves, save states, rewind,
   and the System Card functions the game uses, reimplemented in C (no BIOS needed).
-- A gothic start screen (a castle under a blood moon) and menus in arched gold-and-crimson
-  frames with blackletter titles, with controller, keyboard and mouse.
+- A gothic start screen (a candlelit town at night under a pale moon) and menus in arched
+  gold-and-umber frames with blackletter titles, with controller, keyboard and mouse.
 - An in-game menu (F1 / Back): video modes for 4K, 16:9 and ultrawide screens (4:3 with
   blurred sides, square pixels, stretch, integer scaling, sharp filtering), cinematic
   skipping, cheats (infinite health, hearts, lives), modern controller layout with
   sub-weapon / Item Crash / backflip buttons, and a Japanese option (with your Japanese disc).
 - The original Japanese disc and the English translation, installed side by side (the
   Japanese story text uses a bundled public-domain kanji font in place of the System Card's).
-- An experimental widescreen option (off by default) that shows more of the level (enemies
-  included) on 16:9 and 21:9 screens, Richter's run from Symphony of the Night (hold LB), and Maria cheats (unlocked; play as her
+- Richter's run from Symphony of the Night (hold LB), and Maria cheats (unlocked; play as her
   from the Prologue on). See [docs/runtime.md](docs/runtime.md).
 
 ## For players

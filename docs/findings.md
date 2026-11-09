@@ -111,8 +111,8 @@ Bank-aware recursive descent from `$4000` plus both IRQ vectors, after groups 0/
 
 All share the track layout (CD audio is found by absolute position, so it must match) and the
 boot sector (fingerprint `DB4D9415EC501573`); the code differs little (an English-built
-`rondo.exe` runs the Japanese disc 99% native). Game RAM, the widescreen patch sites, run and
-Maria behave the same on both.
+`rondo.exe` runs the Japanese disc 99% native). Game RAM, run and Maria behave the same on
+both.
 
 ## Game state (work RAM, found by watching the game; `tools/frontend/game.h`)
 
@@ -151,7 +151,10 @@ Richter walks at $0140 (1.25 px a frame), jumps at $0150, Maria walks and jumps 
 walking speed is set once as a walk starts (a two-entry table by facing in Richter's code).
 Forcing $9F = 1 before Stage 0 loads plays the Prologue as Maria.
 
-## Camera, scrolling and objects (widescreen)
+## Camera, scrolling and objects
+
+Found for the widescreen option (0.6 to 0.12; taken out in 0.13, see git history for
+`tools/frontend/wide.c`).
 
 - Scroll layers at $1E00+ (8 layers): X sub/low/high $1E00/$1E08/$1E10, Y $1E18/$1E20/$1E28,
   velocities $1E6E-$1E86, map page counters $1E8E/$1E96, per-frame copies at $1E39+ for the

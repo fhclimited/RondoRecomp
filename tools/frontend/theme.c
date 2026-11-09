@@ -435,7 +435,7 @@ void th_plate(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float s
     if (border.a) th_polyline(ren, p, 4, true, border, thick);
 }
 
-/* ---- the emblem and the backdrop ------------------------------------------------------ */
+/* ---- ornaments ---------------------------------------------------------------------- */
 
 void th_disc(SDL_Renderer *ren, float cx, float cy, float r, SDL_Color top, SDL_Color bottom)
 {
@@ -503,7 +503,7 @@ static int arch_points(float x0, float x1, float y0, float rise, SDL_FPoint *out
     return k;
 }
 
-/* A pinnacle standing on (x, y): a post with a pointed cap and a crimson jewel. */
+/* A pinnacle standing on (x, y): a post with a pointed cap and a ruby. */
 static void pinnacle(SDL_Renderer *ren, float x, float y, float u, float alpha)
 {
     SDL_Color gold = th_fade(TH_GOLD, alpha), dark = th_fade((SDL_Color){60, 30, 14, 255}, alpha);
@@ -515,7 +515,7 @@ static void pinnacle(SDL_Renderer *ren, float x, float y, float u, float alpha)
     SDL_FPoint cap[3] = {{x - w - 2 * u, y - h}, {x, y - h - 15 * u}, {x + w + 2 * u, y - h}};
     th_poly(ren, cap, 3, th_fade((SDL_Color){250, 214, 130, 255}, alpha), gold, y - h - 15 * u, y - h);
     th_polyline(ren, cap, 3, true, dark, 1.0f * u);
-    diamond(ren, x, y - h * 0.45f, 2.6f * u, th_fade(TH_CRIMSON, alpha), TH_NONE, 0);
+    diamond(ren, x, y - h * 0.45f, 2.6f * u, th_fade(TH_RUBY, alpha), TH_NONE, 0);
 }
 
 void th_frame(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float rise, float u, float alpha)
@@ -525,11 +525,13 @@ void th_frame(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float r
     int k = arch_points(x0, x1, y0, rise, pts, N);
     pts[k++] = (SDL_FPoint){x1, y1};
     pts[k++] = (SDL_FPoint){x0, y1};
-    th_poly(ren, pts, k, th_fade((SDL_Color){48, 10, 20, 244}, alpha), th_fade((SDL_Color){12, 3, 7, 248}, alpha), y0,
-            y1);
-    /* light through the arch, falling into the panel */
-    th_rect_v(ren, x0 + 7 * u, y0 + rise, x1 - 7 * u, y0 + rise + 90 * u, th_fade(th_alpha(TH_CRIMSON, 34), alpha),
-              th_alpha(TH_CRIMSON, 0));
+    th_poly(ren, pts, k, th_fade(TH_PANEL_TOP, alpha), th_fade(TH_PANEL_BOTTOM, alpha), y0, y1);
+    /* pale moonlight through the arch, falling into the panel; candlelight warming it from below */
+    th_poly(ren, pts, 2 * N + 1, th_fade(th_alpha(TH_MOON, 30), alpha), th_fade(th_alpha(TH_MOON, 22), alpha), y0,
+            y0 + rise);
+    th_rect_v(ren, x0 + 1 * u, y0 + rise, x1 - 1 * u, y0 + rise + 120 * u, th_fade(th_alpha(TH_MOON, 22), alpha),
+              th_alpha(TH_MOON, 0));
+    th_rect_v(ren, x0 + 1 * u, y1 - 110 * u, x1 - 1 * u, y1, th_alpha(TH_CANDLE, 0), th_fade(th_alpha(TH_CANDLE, 18), alpha));
     th_polyline(ren, pts, k, true, th_fade(th_alpha(TH_GOLD, 36), alpha), 5.0f * u);    /* glow */
     th_polyline(ren, pts, k, true, th_fade(th_alpha(TH_GOLD, 215), alpha), 1.6f * u);
     int ki = arch_points(x0 + 6 * u, x1 - 6 * u, y0 + 8 * u, rise - 2 * u, in, N);
@@ -541,8 +543,8 @@ void th_frame(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float r
     pinnacle(ren, x1, y0 + rise, u, alpha);
     th_cross(ren, (x0 + x1) * 0.5f, y0 - 11 * u, 13 * u, th_fade((SDL_Color){255, 226, 150, 255}, alpha),
              th_fade((SDL_Color){176, 116, 38, 255}, alpha), th_fade((SDL_Color){70, 24, 12, 255}, alpha), 1.0f * u);
-    diamond(ren, x0, y1, 6 * u, th_fade(TH_CRIMSON, alpha), th_fade(TH_GOLD, alpha), 1.2f * u);
-    diamond(ren, x1, y1, 6 * u, th_fade(TH_CRIMSON, alpha), th_fade(TH_GOLD, alpha), 1.2f * u);
+    diamond(ren, x0, y1, 6 * u, th_fade(TH_RUBY, alpha), th_fade(TH_GOLD, alpha), 1.2f * u);
+    diamond(ren, x1, y1, 6 * u, th_fade(TH_RUBY, alpha), th_fade(TH_GOLD, alpha), 1.2f * u);
 }
 
 void th_divider(SDL_Renderer *ren, float x0, float x1, float y, float u, float alpha)
@@ -559,7 +561,7 @@ void th_divider(SDL_Renderer *ren, float x0, float x1, float y, float u, float a
     diamond(ren, mid + 30 * u, y, 3.2f * u, th_fade(TH_GOLD, alpha), TH_NONE, 0);
     diamond(ren, mid - 19 * u, y, 2.2f * u, th_fade(th_alpha(TH_GOLD, 200), alpha), TH_NONE, 0);
     diamond(ren, mid + 19 * u, y, 2.2f * u, th_fade(th_alpha(TH_GOLD, 200), alpha), TH_NONE, 0);
-    diamond(ren, mid, y, 8 * u, th_fade(TH_CRIMSON, alpha), th_fade(TH_GOLD, alpha), 1.2f * u);
+    diamond(ren, mid, y, 8 * u, th_fade(TH_RUBY, alpha), th_fade(TH_GOLD, alpha), 1.2f * u);
     th_cross(ren, mid, y - 0.6f * u, 5.5f * u, th_fade((SDL_Color){255, 226, 150, 255}, alpha),
              th_fade((SDL_Color){200, 140, 50, 255}, alpha), TH_NONE, 0);
 }
@@ -568,8 +570,7 @@ void th_plaque(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float 
 {
     float my = (y0 + y1) * 0.5f, p = (y1 - y0) * 0.5f;
     SDL_FPoint pts[6] = {{x0, my}, {x0 + p, y0}, {x1 - p, y0}, {x1, my}, {x1 - p, y1}, {x0 + p, y1}};
-    th_poly(ren, pts, 6, th_fade((SDL_Color){52, 12, 22, 240}, alpha), th_fade((SDL_Color){16, 4, 9, 244}, alpha), y0,
-            y1);
+    th_poly(ren, pts, 6, th_fade(TH_PANEL_TOP, alpha), th_fade(TH_PANEL_BOTTOM, alpha), y0, y1);
     th_polyline(ren, pts, 6, true, th_fade(th_alpha(TH_GOLD, 36), alpha), 4.0f * u);
     th_polyline(ren, pts, 6, true, th_fade(th_alpha(TH_GOLD, 210), alpha), 1.3f * u);
     float d = 3.5f * u;
@@ -580,25 +581,74 @@ void th_plaque(SDL_Renderer *ren, float x0, float y0, float x1, float y1, float 
 
 /* ---- the emblem and the backdrop ------------------------------------------------------ */
 
+static float hash01(unsigned n)
+{
+    n = (n << 13) ^ n;
+    n = n * (n * n * 15731u + 789221u) + 1376312589u;
+    return (float)(n & 0x7fffffff) / 2147483648.0f;
+}
+
+/* A candle's flicker, 0.6-1, different for every seed. */
+static float flicker(float t, unsigned seed)
+{
+    float a = 4.0f + 3.0f * hash01(seed * 3u + 1u), b = 9.0f + 5.0f * hash01(seed * 3u + 2u);
+    return 0.8f + 0.12f * sinf(t * a + (float)seed) + 0.08f * sinf(t * b + 1.7f * (float)seed);
+}
+
+/* A soft round light (rx by ry): `inner` at the centre, fading to nothing at the rim, about
+ * as light falls off. Added to what is there (`add`: light) or blended over it (haze). */
+static void glow(SDL_Renderer *ren, float cx, float cy, float rx, float ry, SDL_Color inner, bool add)
+{
+    enum { N = 36 };
+    if (!inner.a || rx < 0.5f || ry < 0.5f) return;
+    SDL_Vertex v[1 + 2 * N];
+    int idx[N * 9], ni = 0;
+    SDL_FColor c = fc(inner), m = c, e = c;
+    m.a *= 0.42f;
+    e.a = 0;
+    v[0] = (SDL_Vertex){{cx, cy}, c, {0, 0}};
+    for (int i = 0; i < N; i++) {
+        float a = (float)i * 6.2831853f / (float)N, ca = cosf(a), sa = sinf(a);
+        v[1 + i] = (SDL_Vertex){{cx + ca * rx * 0.3f, cy + sa * ry * 0.3f}, m, {0, 0}};
+        v[1 + N + i] = (SDL_Vertex){{cx + ca * rx, cy + sa * ry}, e, {0, 0}};
+    }
+    for (int i = 0; i < N; i++) {
+        int j = (i + 1) % N;
+        idx[ni++] = 0; idx[ni++] = 1 + i; idx[ni++] = 1 + j;
+        idx[ni++] = 1 + i; idx[ni++] = 1 + N + i; idx[ni++] = 1 + N + j;
+        idx[ni++] = 1 + i; idx[ni++] = 1 + N + j; idx[ni++] = 1 + j;
+    }
+    SDL_SetRenderDrawBlendMode(ren, add ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
+    SDL_RenderGeometry(ren, NULL, v, 1 + 2 * N, idx, ni);
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+}
+
 void th_emblem(SDL_Renderer *ren, float cx, float cy, float r, float t, float alpha)
 {
     const float tau = 6.2831853f;
-    float k = r / 70.0f, glow = 0.5f + 0.5f * sinf(t * 1.6f);
-    /* a soft crimson halo */
-    for (int i = 3; i >= 1; i--)
-        th_disc(ren, cx, cy, r * (1.12f + 0.14f * (float)i), th_fade(th_alpha(TH_CRIMSON, (int)(9 + 7 * glow)), alpha),
-                th_fade(th_alpha(TH_CRIMSON, 3), alpha));
+    float k = r / 70.0f, f = flicker(t * 0.6f, 5u);
+    /* candlelight through the glass, warming the wall around it */
+    glow(ren, cx, cy, r * 2.1f, r * 2.1f, th_fade((SDL_Color){255, 160, 70, (Uint8)(34 * f)}, alpha), true);
     /* the stone ring with gold rims and studs */
-    th_disc(ren, cx, cy, r * 1.14f, th_fade((SDL_Color){70, 28, 30, 255}, alpha), th_fade((SDL_Color){24, 7, 11, 255}, alpha));
+    th_disc(ren, cx, cy, r * 1.14f, th_fade((SDL_Color){70, 62, 60, 255}, alpha), th_fade((SDL_Color){24, 21, 23, 255}, alpha));
     th_arc(ren, cx, cy, r * 1.14f, 0, tau, th_fade(TH_GOLD, alpha), 1.8f * k);
     for (int i = 0; i < 16; i++) {
         float a = (float)i * tau / 16.0f;
         th_disc(ren, cx + cosf(a) * r * 1.07f, cy + sinf(a) * r * 1.07f, 1.8f * k, th_fade(TH_GOLD, alpha),
                 th_fade((SDL_Color){150, 100, 40, 255}, alpha));
     }
-    /* the stained glass, glowing slowly */
-    th_disc(ren, cx, cy, r, th_fade((SDL_Color){(Uint8)(150 + 50 * glow), 24, 42, 255}, alpha),
-            th_fade((SDL_Color){46, 8, 40, 255}, alpha));
+    /* the stained glass: blues and indigos, lit from behind by the candle, warmest at the middle */
+    th_disc(ren, cx, cy, r, th_fade((SDL_Color){30, 44, 92, 255}, alpha), th_fade((SDL_Color){12, 16, 42, 255}, alpha));
+    for (int i = 0; i < 8; i++) {
+        float b = (float)i * tau / 8.0f + tau / 16.0f, lx = cx + cosf(b) * r * 0.66f, ly = cy + sinf(b) * r * 0.66f;
+        if (i & 1)
+            th_disc(ren, lx, ly, r * 0.27f, th_fade((SDL_Color){62, 92, 158, 255}, alpha),
+                    th_fade((SDL_Color){20, 30, 78, 255}, alpha));
+        else
+            th_disc(ren, lx, ly, r * 0.27f, th_fade((SDL_Color){76, 70, 150, 255}, alpha),
+                    th_fade((SDL_Color){26, 22, 74, 255}, alpha));
+    }
+    glow(ren, cx, cy, r * 1.05f, r * 1.05f, th_fade((SDL_Color){255, 180, 96, (Uint8)(96 * f)}, alpha), true);
     /* tracery: eight lobes between eight spokes, an inner ring */
     SDL_Color lead = th_fade(th_alpha(TH_GOLD, 210), alpha);
     for (int i = 0; i < 8; i++) {
@@ -608,59 +658,160 @@ void th_emblem(SDL_Renderer *ren, float cx, float cy, float r, float t, float al
                 1.3f * k);
     }
     th_arc(ren, cx, cy, r, 0, tau, th_fade(TH_GOLD, alpha), 2.0f * k);
-    th_disc(ren, cx, cy, r * 0.36f, th_fade((SDL_Color){120, 16, 30, 255}, alpha), th_fade((SDL_Color){52, 6, 18, 255}, alpha));
+    th_disc(ren, cx, cy, r * 0.36f, th_fade((SDL_Color){(Uint8)(214 + 30 * f), 150, 70, 255}, alpha),
+            th_fade((SDL_Color){140, 72, 22, 255}, alpha));
     th_arc(ren, cx, cy, r * 0.36f, 0, tau, lead, 1.4f * k);
-    /* the cross */
-    th_cross(ren, cx, cy - r * 0.10f, r * 0.70f, th_fade(th_alpha(TH_CRIMSON, (int)(70 + 60 * glow)), alpha),
-             th_fade(th_alpha(TH_CRIMSON, 20), alpha), TH_NONE, 0);
-    th_cross(ren, cx, cy - r * 0.10f, r * 0.62f, th_fade((SDL_Color){255, 230, 156, 255}, alpha),
-             th_fade((SDL_Color){176, 116, 38, 255}, alpha), th_fade((SDL_Color){60, 20, 10, 255}, alpha), 1.4f * k);
+    /* the cross, a warm light about it */
+    glow(ren, cx, cy - r * 0.10f, r * 0.75f, r * 0.75f, th_fade((SDL_Color){255, 200, 120, (Uint8)(60 * f)}, alpha), true);
+    th_cross(ren, cx, cy - r * 0.10f, r * 0.62f, th_fade((SDL_Color){255, 232, 164, 255}, alpha),
+             th_fade((SDL_Color){176, 116, 38, 255}, alpha), th_fade((SDL_Color){60, 30, 10, 255}, alpha), 1.4f * k);
 }
 
-static float hash01(unsigned n)
+/* The moon lights the town from the upper left. */
+#define MOONLIT ((SDL_Color){168, 184, 220, 255})
+
+/* A lit window (w x h) at (x, y), its top left: candlelight with a cross of glazing bars and
+ * a glow about it; unlit, a faint pane. `bright` scales the light (the far row is dimmer). */
+static void window_at(SDL_Renderer *ren, float x, float y, float w, float h, bool lit, float f, float bright, float u)
 {
-    n = (n << 13) ^ n;
-    n = n * (n * n * 15731u + 789221u) + 1376312589u;
-    return (float)(n & 0x7fffffff) / 2147483648.0f;
+    if (!lit) {
+        th_rect(ren, x, y, x + w, y + h, (SDL_Color){30, 32, 48, (Uint8)(200 * bright)});
+        return;
+    }
+    glow(ren, x + w * 0.5f, y + h * 0.5f, w * 2.6f, h * 1.9f, (SDL_Color){255, 150, 60, (Uint8)(52 * f * bright)}, true);
+    th_rect_v(ren, x, y, x + w, y + h, (SDL_Color){255, 214, 140, (Uint8)(235 * f * bright)},
+              (SDL_Color){240, 140, 56, (Uint8)(235 * f * bright)});
+    if (w > 4 * u) {
+        SDL_Color bar = {40, 22, 12, (Uint8)(220 * bright)};
+        th_rect(ren, x + w * 0.5f - 0.5f * u, y, x + w * 0.5f + 0.5f * u, y + h, bar);
+        th_rect(ren, x, y + h * 0.45f - 0.5f * u, x + w, y + h * 0.45f + 0.5f * u, bar);
+    }
 }
 
-/* The castle's skyline along the bottom of the screen (units from the centre). */
-static void castle(SDL_Renderer *ren, float cx, float bottom, float u, float t)
+/* A house of the town from x0 to x1, its walls from `top` down to `ground`: a gable roof
+ * (roof 0), a steep one (1) or a flat one behind a parapet (2), perhaps a chimney, and
+ * windows, some lit by candles. far: the paler row behind, with fewer, dimmer lights. */
+static void house(SDL_Renderer *ren, float x0, float x1, float top, float ground, int roof, unsigned seed, float u,
+                  float t, bool far)
+{
+    SDL_Color wall = far ? (SDL_Color){24, 27, 46, 255} : (SDL_Color){10, 10, 18, 255};
+    SDL_Color rim = th_alpha(MOONLIT, far ? 60 : 110);
+    float w = x1 - x0, mid = (x0 + x1) * 0.5f, pitch = 0;
+    th_rect(ren, x0, top, x1, ground, wall);
+    if (roof == 2) {
+        th_rect(ren, x0 - 2 * u, top - 5 * u, x1 + 2 * u, top + 1, wall);
+        th_line(ren, x0 - 2 * u, top - 5 * u, x1 + 2 * u, top - 5 * u, th_alpha(rim, rim.a / 2), 1.0f * u);
+    } else {
+        pitch = roof == 1 ? 1.3f : 0.55f + 0.3f * hash01(seed + 5u);
+        float apex = top - (w * 0.5f + 3 * u) * pitch;
+        SDL_FPoint p[3] = {{x0 - 3 * u, top + 1}, {mid, apex}, {x1 + 3 * u, top + 1}};
+        th_poly(ren, p, 3, wall, wall, apex, top);
+        th_line(ren, x0 - 3 * u, top, mid, apex, rim, 1.0f * u);          /* the moonlit slope */
+    }
+    if (hash01(seed + 9u) < 0.55f) {                                     /* a chimney */
+        float c = x0 + w * (0.22f + 0.56f * hash01(seed + 10u)), cw = (far ? 4.0f : 6.0f) * u;
+        float at = roof == 2 ? top - 5 * u : top - (w * 0.5f + 3 * u - fabsf(c - mid)) * pitch;
+        float ct = at - (8 + 8 * hash01(seed + 11u)) * u;
+        th_rect(ren, c - cw * 0.5f, ct, c + cw * 0.5f, at + 2 * u, wall);
+        th_rect(ren, c - cw * 0.5f - 1 * u, ct - 2 * u, c + cw * 0.5f + 1 * u, ct, wall);
+        th_line(ren, c - cw * 0.5f - 1 * u, ct - 2 * u, c - cw * 0.5f - 1 * u, at, th_alpha(rim, rim.a / 2), 1.0f * u);
+    }
+    /* windows */
+    float ww = (far ? 3.5f : 6.0f) * u, wh = (far ? 5.0f : 9.0f) * u, gx = (far ? 13.0f : 20.0f) * u,
+          gy = (far ? 15.0f : 24.0f) * u;
+    int cols = (int)((w - 6 * u) / gx), rows = (int)((ground - top - 8 * u) / gy);
+    if (cols > 4) cols = 4;
+    if (rows > 4) rows = 4;
+    float left = mid - (float)(cols - 1) * gx * 0.5f - ww * 0.5f;
+    for (int r = 0; r < rows; r++)
+        for (int c = 0; c < cols; c++) {
+            unsigned s = seed * 17u + (unsigned)(r * 5 + c);
+            bool lit = hash01(s + 101u) < (far ? 0.32f : 0.5f);
+            window_at(ren, left + (float)c * gx, top + 8 * u + (float)r * gy, ww, wh, lit, flicker(t, s),
+                      far ? 0.55f : 1.0f, u);
+        }
+}
+
+/* A street lantern on a post standing on `ground` at x, with its pool of warm light. */
+static void lantern(SDL_Renderer *ren, float x, float ground, float u, float t, unsigned seed)
+{
+    SDL_Color iron = {8, 8, 14, 255};
+    float f = flicker(t, seed + 900u), top = ground - 46 * u;
+    glow(ren, x, top - 4 * u, 34 * u, 30 * u, (SDL_Color){255, 150, 60, (Uint8)(70 * f)}, true);
+    th_rect(ren, x - 1.0f * u, top, x + 1.0f * u, ground, iron);
+    th_rect(ren, x - 2.5f * u, top - 1 * u, x + 2.5f * u, top + 1 * u, iron);
+    th_rect_v(ren, x - 3 * u, top - 9 * u, x + 3 * u, top - 1 * u, (SDL_Color){255, 222, 150, (Uint8)(250 * f)},
+              (SDL_Color){250, 150, 60, (Uint8)(250 * f)});
+    SDL_FPoint cap[3] = {{x - 4.5f * u, top - 9 * u}, {x, top - 14 * u}, {x + 4.5f * u, top - 9 * u}};
+    th_poly(ren, cap, 3, iron, iron, top - 14 * u, top - 9 * u);
+    glow(ren, x, top - 5 * u, 8 * u, 8 * u, (SDL_Color){255, 230, 170, (Uint8)(120 * f)}, true);
+}
+
+/* The church on the left: a tower with a spire and a cross, a lit lancet window, a nave. */
+static void church(SDL_Renderer *ren, float x, float ground, float u, float t)
+{
+    SDL_Color wall = {10, 10, 18, 255}, rim = th_alpha(MOONLIT, 110);
+    float tw = 34 * u, top = ground - 150 * u, spire = top - 104 * u;
+    th_rect(ren, x + tw * 0.5f - 2 * u, ground - 86 * u, x + tw * 0.5f + 70 * u, ground, wall);          /* nave */
+    SDL_FPoint nave[3] = {{x + tw * 0.5f - 2 * u, ground - 86 * u}, {x + tw * 0.5f + 34 * u, ground - 112 * u},
+                          {x + tw * 0.5f + 70 * u, ground - 86 * u}};
+    th_poly(ren, nave, 3, wall, wall, ground - 112 * u, ground - 86 * u);
+    th_line(ren, nave[0].x, nave[0].y, nave[1].x, nave[1].y, rim, 1.0f * u);
+    th_rect(ren, x - tw * 0.5f, top, x + tw * 0.5f, ground, wall);                                       /* tower */
+    th_rect(ren, x - tw * 0.5f - 3 * u, top - 4 * u, x + tw * 0.5f + 3 * u, top + 1, wall);
+    SDL_FPoint sp[3] = {{x - tw * 0.5f + 1 * u, top - 3 * u}, {x, spire}, {x + tw * 0.5f - 1 * u, top - 3 * u}};
+    th_poly(ren, sp, 3, wall, wall, spire, top);
+    th_line(ren, sp[0].x, sp[0].y, x, spire, rim, 1.0f * u);
+    th_line(ren, x - tw * 0.5f - 3 * u, top - 4 * u, x - tw * 0.5f - 3 * u, ground, th_alpha(rim, 50), 1.0f * u);
+    th_rect(ren, x - 0.8f * u, spire - 14 * u, x + 0.8f * u, spire + 1, wall);                           /* cross */
+    th_rect(ren, x - 4.5f * u, spire - 10.5f * u, x + 4.5f * u, spire - 9 * u, wall);
+    /* the belfry's lancet, lit, and the nave's windows */
+    float f = flicker(t * 0.7f, 77u);
+    glow(ren, x, top + 30 * u, 26 * u, 34 * u, (SDL_Color){255, 150, 60, (Uint8)(60 * f)}, true);
+    SDL_FPoint lancet[5] = {{x - 5 * u, top + 42 * u}, {x - 5 * u, top + 24 * u}, {x, top + 15 * u},
+                            {x + 5 * u, top + 24 * u}, {x + 5 * u, top + 42 * u}};
+    th_poly(ren, lancet, 5, (SDL_Color){255, 216, 140, (Uint8)(240 * f)}, (SDL_Color){236, 130, 50, (Uint8)(240 * f)},
+            top + 15 * u, top + 42 * u);
+    th_rect(ren, x - 0.5f * u, top + 18 * u, x + 0.5f * u, top + 42 * u, (SDL_Color){40, 22, 12, 220});
+    for (int i = 0; i < 3; i++)
+        window_at(ren, x + tw * 0.5f + (12 + 20 * (float)i) * u, ground - 70 * u, 6 * u, 16 * u, true,
+                  flicker(t, 80u + (unsigned)i), 0.9f, u);
+}
+
+/* The castle on its hill, far off behind the town (pale with distance). */
+static void castle(SDL_Renderer *ren, float cx, float ground, float u, float t)
 {
     static const struct { float x, w, h; int roof; } towers[] = {
-        {-690, 46, 150, 1}, {-620, 64, 110, 0}, {-555, 38, 178, 2}, {-480, 72, 132, 0}, {-405, 50, 212, 1},
-        {-338, 34, 162, 2}, {-270, 84, 118, 0}, {-190, 56, 244, 1}, {-128, 32, 186, 2}, {-55, 112, 150, 0},
-        {35, 44, 276, 2}, {96, 62, 204, 1}, {168, 92, 138, 0}, {246, 46, 232, 1}, {305, 34, 172, 2},
-        {376, 72, 124, 0}, {446, 50, 196, 1}, {515, 40, 152, 2}, {585, 66, 114, 0}, {656, 46, 170, 1},
+        {-120, 30, 150, 1}, {-86, 52, 112, 0}, {-46, 26, 186, 2}, {-6, 70, 128, 0},
+        {38, 34, 214, 1}, {78, 46, 140, 0}, {116, 24, 170, 2}, {150, 40, 104, 0},
     };
-    SDL_Color stone = {16, 4, 9, 255};
-    /* the wall and its battlements */
-    th_rect(ren, cx - 820 * u, bottom - 64 * u, cx + 820 * u, bottom, stone);
-    for (float x = -820; x < 820; x += 16) th_rect(ren, cx + x * u, bottom - 72 * u, cx + (x + 8) * u, bottom - 63 * u, stone);
+    SDL_Color stone = {26, 30, 52, 255}, rim = th_alpha(MOONLIT, 50);
+    /* the hill */
+    SDL_FPoint hill[34];
+    int n = 0;
+    for (int i = 0; i <= 31; i++) {
+        float x = -420.0f + 840.0f * (float)i / 31.0f, d = x / 260.0f;
+        hill[n++] = (SDL_FPoint){cx + x * u, ground - (14.0f + 92.0f * expf(-d * d)) * u};
+    }
+    hill[n++] = (SDL_FPoint){cx + 420 * u, ground};
+    hill[n++] = (SDL_FPoint){cx - 420 * u, ground};
+    th_poly(ren, hill, n, (SDL_Color){30, 34, 58, 255}, stone, ground - 106 * u, ground);
+    float base = ground - 96 * u;
+    th_rect(ren, cx - 140 * u, base - 40 * u, cx + 176 * u, base + 10 * u, stone);
     for (size_t i = 0; i < sizeof towers / sizeof towers[0]; i++) {
-        float x = cx + towers[i].x * u, w = towers[i].w * u, top = bottom - towers[i].h * u;
-        th_rect(ren, x - w * 0.5f, top, x + w * 0.5f, bottom, stone);
+        float x = cx + towers[i].x * u, w = towers[i].w * u, top = base - towers[i].h * u * 0.62f;
+        th_rect(ren, x - w * 0.5f, top, x + w * 0.5f, base, stone);
         if (towers[i].roof == 0) {
-            for (float m = -w * 0.5f; m < w * 0.5f - 2 * u; m += 12 * u)
-                th_rect(ren, x + m, top - 8 * u, x + m + 7 * u, top + 1, stone);
+            for (float m = -w * 0.5f; m < w * 0.5f - 2 * u; m += 9 * u)
+                th_rect(ren, x + m, top - 5 * u, x + m + 5 * u, top + 1, stone);
         } else {
-            float lean = towers[i].roof == 2 ? 2.4f : 1.5f;
-            SDL_FPoint roof[3] = {{x - w * 0.5f - 4 * u, top + 1}, {x, top - w * lean}, {x + w * 0.5f + 4 * u, top + 1}};
+            float lean = towers[i].roof == 2 ? 2.2f : 1.4f;
+            SDL_FPoint roof[3] = {{x - w * 0.5f - 3 * u, top + 1}, {x, top - w * lean}, {x + w * 0.5f + 3 * u, top + 1}};
             th_poly(ren, roof, 3, stone, stone, top - w * lean, top);
-            th_line(ren, x, top - w * lean, x, top - w * lean - 12 * u, stone, 1.6f * u);   /* the finial */
+            th_line(ren, roof[0].x, roof[0].y, x, top - w * lean, rim, 1.0f * u);
         }
-        /* lit windows, the candles inside flickering */
-        int nwin = (int)(hash01((unsigned)i * 7u + 3u) * 3.0f);
-        for (int j = 0; j < nwin; j++) {
-            float wy = top + (towers[i].h * u) * (0.18f + 0.22f * (float)j);
-            if (wy > bottom - 70 * u) break;
-            float wx = x + (hash01((unsigned)(i * 13 + j)) - 0.5f) * (w - 14 * u);
-            float f = 0.75f + 0.25f * sinf(t * (5.0f + (float)j) + (float)i * 2.1f);
-            SDL_Color lit = {255, 176, 84, (Uint8)(170 * f)};
-            th_rect(ren, wx - 2.5f * u, wy, wx + 2.5f * u, wy + 8 * u, lit);
-            th_disc(ren, wx, wy, 2.5f * u, lit, lit);
-            th_disc(ren, wx, wy + 4 * u, 9 * u, th_alpha(lit, (int)(26 * f)), th_alpha(lit, 0));
-        }
+        if (hash01((unsigned)i + 40u) < 0.5f)
+            window_at(ren, x - 1.5f * u, top + 12 * u, 3 * u, 5 * u, true, flicker(t, 60u + (unsigned)i), 0.5f, u);
     }
 }
 
@@ -678,51 +829,113 @@ static void bat(SDL_Renderer *ren, float x, float y, float s, float flap, SDL_Co
 void th_backdrop(SDL_Renderer *ren, int w, int h, float t)
 {
     float fw = (float)w, fh = (float)h, u = th_unit(w, h), cx = fw * 0.5f;
-    /* the night sky, red towards the horizon */
-    th_rect_v(ren, 0, 0, fw, fh * 0.64f, (SDL_Color){14, 3, 10, 255}, (SDL_Color){70, 13, 26, 255});
-    th_rect_v(ren, 0, fh * 0.64f, fw, fh, (SDL_Color){70, 13, 26, 255}, (SDL_Color){10, 2, 5, 255});
-    /* stars */
-    for (unsigned i = 0; i < 110; i++) {
-        float x = hash01(i * 2u + 11u) * fw, y = hash01(i * 2u + 12u) * fh * 0.58f;
+    /* the night sky: deep blue, a little warmer low down where the town's lights reach */
+    th_rect_v(ren, 0, 0, fw, fh * 0.5f, (SDL_Color){4, 6, 16, 255}, (SDL_Color){14, 20, 42, 255});
+    th_rect_v(ren, 0, fh * 0.5f, fw, fh * 0.8f, (SDL_Color){14, 20, 42, 255}, (SDL_Color){38, 34, 52, 255});
+    th_rect_v(ren, 0, fh * 0.8f, fw, fh, (SDL_Color){38, 34, 52, 255}, (SDL_Color){12, 11, 18, 255});
+    /* the pale moon, high on the left */
+    float mx = cx - 390 * u, my = fh * 0.15f, mr = 36 * u;
+    /* stars, fewer near the moon */
+    for (unsigned i = 0; i < 140; i++) {
+        float x = hash01(i * 2u + 11u) * fw, y = hash01(i * 2u + 12u) * fh * 0.6f;
+        float d = sqrtf((x - mx) * (x - mx) + (y - my) * (y - my)) / mr;
+        if (d < 4.0f) continue;
         float tw = 0.55f + 0.45f * sinf(t * (0.8f + hash01(i + 400u) * 1.6f) + (float)i);
-        float r = (0.6f + hash01(i + 900u) * 1.1f) * u;
+        float r = (0.6f + hash01(i + 900u) * 1.1f) * u, fade = d < 8.0f ? (d - 4.0f) / 4.0f : 1.0f;
         th_rect(ren, x - r * 0.5f, y - r * 0.5f, x + r * 0.5f, y + r * 0.5f,
-                (SDL_Color){255, 236, 214, (Uint8)(40 + 130 * tw * hash01(i + 77u))});
+                (SDL_Color){222, 230, 255, (Uint8)((30 + 140 * tw * hash01(i + 77u)) * fade)});
     }
-    /* the blood moon */
-    float mx = cx - 400 * u, my = fh * 0.2f, mr = 46 * u;
-    for (int i = 4; i >= 1; i--)
-        th_disc(ren, mx, my, mr * (1.0f + 0.32f * (float)i), (SDL_Color){200, 40, 40, (Uint8)(14 - 2 * i)},
-                (SDL_Color){200, 40, 40, (Uint8)(10 - 2 * i)});
-    th_disc(ren, mx, my, mr, (SDL_Color){255, 212, 180, 255}, (SDL_Color){214, 104, 86, 255});
-    th_disc(ren, mx - mr * 0.3f, my - mr * 0.2f, mr * 0.22f, (SDL_Color){190, 90, 80, 60}, (SDL_Color){190, 90, 80, 40});
-    th_disc(ren, mx + mr * 0.25f, my + mr * 0.3f, mr * 0.16f, (SDL_Color){190, 90, 80, 55}, (SDL_Color){190, 90, 80, 35});
-    th_disc(ren, mx + mr * 0.35f, my - mr * 0.35f, mr * 0.1f, (SDL_Color){190, 90, 80, 50}, (SDL_Color){190, 90, 80, 30});
-    /* clouds drifting by: soft puffs */
-    for (unsigned c = 0; c < 3; c++) {
-        float span = fw + 500 * u;
-        float cl = fmodf(t * (5.0f + 2.0f * (float)c) * u + hash01(c + 300u) * span, span) - 250 * u;
-        float cy = fh * (0.16f + 0.14f * (float)c) + mr * 0.2f;
-        for (unsigned p = 0; p < 7; p++) {
-            float px = cl + ((float)p - 3.0f) * 26 * u, pr = (16 + 14 * hash01(c * 10u + p + 500u)) * u;
-            float py = cy + (hash01(c * 10u + p + 600u) - 0.5f) * 10 * u;
-            th_disc(ren, px, py, pr, (SDL_Color){30, 6, 14, 40}, (SDL_Color){18, 4, 9, 70});
+    glow(ren, mx, my, mr * 10, mr * 10, (SDL_Color){120, 140, 200, 64}, true);
+    glow(ren, mx, my, mr * 3.6f, mr * 3.6f, (SDL_Color){200, 214, 250, 120}, true);
+    th_disc(ren, mx, my, mr, (SDL_Color){250, 250, 242, 255}, (SDL_Color){206, 214, 232, 255});
+    th_disc(ren, mx - mr * 0.3f, my - mr * 0.2f, mr * 0.24f, (SDL_Color){168, 176, 200, 70}, (SDL_Color){168, 176, 200, 50});
+    th_disc(ren, mx + mr * 0.22f, my + mr * 0.32f, mr * 0.17f, (SDL_Color){168, 176, 200, 64}, (SDL_Color){168, 176, 200, 44});
+    th_disc(ren, mx + mr * 0.38f, my - mr * 0.3f, mr * 0.11f, (SDL_Color){168, 176, 200, 58}, (SDL_Color){168, 176, 200, 38});
+    th_disc(ren, mx - mr * 0.05f, my + mr * 0.05f, mr * 0.08f, (SDL_Color){168, 176, 200, 50}, (SDL_Color){168, 176, 200, 30});
+    /* moonbeams slanting down onto the town: soft shafts, feathered at their sides, coming
+     * in out of the moon's glow and fading as they fall, slowly brightening and dimming */
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_ADD);
+    for (unsigned i = 0; i < 5; i++) {
+        float ang = 0.92f + 0.11f * (float)i + 0.05f * (hash01(i + 150u) - 0.5f), dx = cosf(ang), dy = sinf(ang);
+        float off = ((float)i - 2.0f) * mr * 0.7f, len = fh * (0.95f + 0.3f * hash01(i + 190u)), in = mr * 3.0f;
+        float s0 = mr * (0.6f + 0.4f * hash01(i + 160u)), s1 = (60 + 70 * hash01(i + 170u)) * u;
+        float sm = s0 + (s1 - s0) * in / len;
+        float a0 = (22 + 12 * hash01(i + 180u)) * (0.55f + 0.45f * sinf(t * 0.21f + (float)i * 1.9f));
+        float ox = mx - dy * off, oy = my + dx * off, nx = -dy, ny = dx;
+        float px = ox + dx * in, py = oy + dy * in, ex = ox + dx * len, ey = oy + dy * len;
+        SDL_FColor lit = fc((SDL_Color){170, 190, 236, (Uint8)a0}), none = lit;
+        none.a = 0;
+        /* three cross-sections (where it starts, at its brightest, where it ends), each dark
+         * at the sides and lit in the middle; lit only at the brightest one */
+        SDL_FPoint s[3][3] = {
+            {{ox + nx * s0, oy + ny * s0}, {ox, oy}, {ox - nx * s0, oy - ny * s0}},
+            {{px + nx * sm, py + ny * sm}, {px, py}, {px - nx * sm, py - ny * sm}},
+            {{ex + nx * s1, ey + ny * s1}, {ex, ey}, {ex - nx * s1, ey - ny * s1}},
+        };
+        for (int k = 0; k < 2; k++) {
+            SDL_FColor c0 = k == 1 ? lit : none, c1 = k == 0 ? lit : none;
+            quad(ren, s[k][0], s[k][1], s[k + 1][1], s[k + 1][0], none, c0, c1, none);
+            quad(ren, s[k][1], s[k][2], s[k + 1][2], s[k + 1][1], c0, none, none, c1);
+        }
+    }
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    /* thin clouds drifting past, silvered near the moon */
+    for (unsigned c = 0; c < 4; c++) {
+        float span = fw + 600 * u;
+        float cl = fmodf(t * (3.0f + 1.6f * (float)c) * u + hash01(c + 300u) * span, span) - 300 * u;
+        float cy = fh * (0.1f + 0.1f * (float)c) + mr * 0.3f;
+        for (unsigned p = 0; p < 6; p++) {
+            float px = cl + ((float)p - 2.5f) * 46 * u, py = cy + (hash01(c * 10u + p + 600u) - 0.5f) * 12 * u;
+            float rx = (50 + 50 * hash01(c * 10u + p + 500u)) * u, ry = (7 + 6 * hash01(c * 10u + p + 550u)) * u;
+            float d = sqrtf((px - mx) * (px - mx) + (py - my) * (py - my)) / (mr * 6), lit = d < 1 ? 1 - d : 0;
+            SDL_Color col = {(Uint8)(34 + 120 * lit), (Uint8)(40 + 124 * lit), (Uint8)(66 + 130 * lit), (Uint8)(70 + 40 * lit)};
+            glow(ren, px, py, rx, ry, col, false);
         }
     }
     /* bats crossing */
-    for (unsigned i = 0; i < 5; i++) {
-        float speed = (18.0f + 14.0f * hash01(i + 31u)) * u;
+    for (unsigned i = 0; i < 3; i++) {
+        float speed = (16.0f + 12.0f * hash01(i + 31u)) * u;
         float x = fmodf(t * speed + hash01(i + 51u) * fw, fw + 160 * u) - 80 * u;
-        float y = fh * (0.12f + 0.32f * hash01(i + 71u)) + sinf(t * 0.9f + (float)i) * 10 * u;
-        bat(ren, x, y, (0.7f + 0.5f * hash01(i + 91u)) * u, sinf(t * 9.0f + (float)i * 1.7f), (SDL_Color){10, 2, 6, 230});
+        float y = fh * (0.1f + 0.28f * hash01(i + 71u)) + sinf(t * 0.9f + (float)i) * 10 * u;
+        bat(ren, x, y, (0.6f + 0.4f * hash01(i + 91u)) * u, sinf(t * 9.0f + (float)i * 1.7f), (SDL_Color){6, 7, 16, 230});
     }
-    /* mist rising from below, then the castle */
-    th_rect_v(ren, 0, fh * 0.6f, fw, fh * 0.86f, (SDL_Color){120, 24, 40, 0}, (SDL_Color){120, 24, 40, 46});
-    castle(ren, cx, fh, u, t);
-    th_rect_v(ren, 0, fh * 0.9f, fw, fh, (SDL_Color){60, 12, 22, 0}, (SDL_Color){60, 12, 22, 60});
-    /* darker edges */
-    SDL_Color dark = {0, 0, 0, 150}, clear = {0, 0, 0, 0};
-    th_rect_h(ren, 0, 0, fw * 0.18f, fh, dark, clear);
-    th_rect_h(ren, fw * 0.82f, 0, fw, fh, clear, dark);
-    th_rect_v(ren, 0, 0, fw, fh * 0.14f, th_alpha(dark, 110), clear);
+    /* far off: the castle on its hill and the town's rear rows, in a cool mist */
+    castle(ren, cx - 150 * u, fh - 40 * u, u, t);
+    {
+        float x = -900;
+        for (unsigned i = 0; x < 900; i++) {
+            float bw = 30 + 34 * hash01(i * 3u + 1001u), bh = 58 + 46 * hash01(i * 3u + 1002u);
+            int roof = hash01(i * 3u + 1003u) < 0.85f ? 0 : 2;
+            house(ren, cx + x * u, cx + (x + bw) * u, fh - bh * u, fh, roof, i * 31u + 2000u, u, t, true);
+            x += bw + 3 + 10 * hash01(i + 1300u);
+        }
+    }
+    th_rect_v(ren, 0, fh * 0.66f, fw, fh * 0.86f, (SDL_Color){110, 126, 170, 0}, (SDL_Color){110, 126, 170, 34});
+    /* the town's warm glow rising into the night */
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_ADD);
+    th_rect_v(ren, 0, fh * 0.6f, fw, fh * 0.9f, (SDL_Color){255, 140, 50, 0}, (SDL_Color){255, 140, 50, 34});
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    /* the near row of houses, the church, lanterns along the street */
+    {
+        float x = -900;
+        for (unsigned i = 0; x < 900; i++) {
+            float bw = 42 + 46 * hash01(i * 3u + 1u), bh = 40 + 52 * hash01(i * 3u + 2u);
+            float r = hash01(i * 3u + 3u);
+            if (x + bw > -490 && x < -370) {                     /* room for the church */
+                church(ren, cx - 430 * u, fh, u, t);
+                x = -370 + 22;
+                continue;
+            }
+            house(ren, cx + x * u, cx + (x + bw) * u, fh - bh * u, fh, r < 0.6f ? 0 : r < 0.82f ? 1 : 2, i * 31u + 7u, u,
+                  t, false);
+            if (hash01(i + 700u) < 0.45f) lantern(ren, cx + (x + bw + 6) * u, fh, u, t, i);
+            x += bw + 12 + 8 * hash01(i + 300u);
+        }
+    }
+    /* the street in shadow, darker edges */
+    th_rect_v(ren, 0, fh * 0.93f, fw, fh, (SDL_Color){4, 4, 10, 0}, (SDL_Color){4, 4, 10, 170});
+    SDL_Color dark = {0, 0, 6, 150}, clear = {0, 0, 6, 0};
+    th_rect_h(ren, 0, 0, fw * 0.16f, fh, dark, clear);
+    th_rect_h(ren, fw * 0.84f, 0, fw, fh, clear, dark);
+    th_rect_v(ren, 0, 0, fw, fh * 0.12f, th_alpha(dark, 90), clear);
 }

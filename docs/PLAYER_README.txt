@@ -42,13 +42,23 @@ Load state    -                     F8
 State slot                          F6 / F7 (slots 1-9, fixed)
 Fullscreen                          F11 (fixed)
 
-Changing a control: on the Controls page choose its row (A / Enter or a click), then press
-the controller button (the triggers count) or the key for it. If another action had it, the
-two swap. Pressing an action's own button or key again leaves it with none, where the game
-can do without it (Sub-weapon, Backflip, Run, Rewind, Save state, Load state). Esc, a click
-or 5 seconds without a press leaves it as it was. Save state and load state have no
-controller button until you give them one. "Reset controls" puts every control back. The
+Changing a control: on the Controls page choose its row (A / Enter or a click). It counts
+down from 5, and whatever you hold down when the count ends becomes the control: a
+controller button (the triggers count), two controller buttons, or a key. A button or key
+you press and let go during the count is taken too, if nothing is held at the end. If
+another action had it, the two swap. Esc, a click, nothing pressed, or the control it
+already has leaves it as it was. On a selected row, X on the controller clears its
+controller button and Delete clears its key, where the game can do without it (Sub-weapon,
+Backflip, Run, Rewind, Save state, Load state). Save state and load state have no controller
+button until you give them one. "Reset controls" puts every control back. The
 menus themselves always use the d-pad / stick / arrows, A / Enter and B / Esc.
+
+Two buttons make a combination, such as Back + RB for Save state and Back + LB for Load
+state: during the count hold Back, then press RB, and keep both down until it ends. In play,
+hold the first button and press the second. The second button then does only the
+combination, so RB and LB on their own still backflip and run. A button that starts a
+combination does its own job when you let go of it without pressing a second one: with the
+example above, Back opens the menu when released instead of when pressed.
 
 Sub-weapon presses Up + Attack for you, Item Crash is the original SELECT button, and
 Backflip presses Jump twice quickly (as Maria it gives her double jump). The original
@@ -80,17 +90,22 @@ F1, Esc or the controller's Back button pauses the game and opens the menu: save
 states, choose the slot, reset, back to the start screen, quit, and:
 
 Video      Fullscreen (uses the screen's own resolution, e.g. 4K)
-           Widescreen (experimental): More of the level, or Off (4:3, the default);
-           see below
+           VSync: on (the default), each frame is shown when the screen refreshes, so the
+           picture never tears; off shows it at once
            Aspect ratio: 4:3 (as on a TV), square pixels, or stretched to fill the screen
            Size: Fit screen (as big as the screen allows), or Whole multiples (every game
            pixel the same size; leaves a border)
            Filter: Sharp (crisp, even pixels), Nearest, or Smooth
+           Screen effect: Off, Scanlines, CRT (scanlines, phosphor stripes and a glow),
+           Curved CRT (the same on curved glass, darker at the corners), or Composite (a
+           soft TV picture); Effect strength: Light, Medium or Strong
            Beside the picture: when the picture is narrower than the screen, a blurred
            copy of it, or black
-Gameplay   Skip cinematics: press START during a story scene or the power-on intro (the
-           story narration and opening before the title screen) to skip it, or skip them
-           automatically, or never
+Gameplay   Skip cinematics: Press START, Automatically, or Never. During the logo and
+           the intro (the story narration and opening before the title screen), START, A
+           or X goes straight to the title screen, the way the game itself allows once it
+           has shown them; Automatically goes there at once. Story scenes in the game have
+           no skip of their own: START (or Automatically) runs them through fast instead
            Rewind on/off, volume, Start screen at launch on/off
 Cheats     Infinite health, infinite hearts (always 99), infinite lives
            Maria unlocked: the game offers Maria as it does after you rescue her in Stage 2
@@ -100,24 +115,6 @@ Cheats     Infinite health, infinite hearts (always 99), infinite lives
 Language   English patch or Japanese original (each is its own disc; see below)
 
 Options are kept in %APPDATA%\RondoRecomp\RondoRecomp\settings.ini.
-
-Widescreen (experimental)
--------------------------
-Off by default: the game is its original 4:3 picture (Video > Aspect ratio fills the screen's
-height, uses square pixels or stretches it). Widescreen is experimental: the game was not made
-for it, so expect graphical glitches here and there (things appearing or vanishing at the
-edges, odd bits of background); turn it off if something looks wrong.
-On 16:9 and ultrawide screens the game draws more of the level on both sides: the
-background, enemies (they appear and move further out, where they are in the level) and
-items, with the score display moved to the left edge. Up to 21:9 (about 112 extra game
-pixels each side) is covered; wider screens get the rest beside the picture.
-Rooms the camera does not scroll through sideways (vertical shafts, boss rooms) keep the
-original 4:3 picture, as do cinematics and menus. Beyond the walls of a room is black.
-Where the picture goes from 4:3 to wide (the Prologue after its story scene, a scrolling
-room after a vertical one) it grows out to the sides over a moment. Turning widescreen on
-takes effect from the next room. Where the game parks something just
-off its 4:3 screen to bring it on later (the Prologue's carriage waits off the left edge
-while the forest goes by), it stays out of sight until it comes in.
 
 Your own icon
 -------------

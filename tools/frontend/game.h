@@ -65,6 +65,25 @@ static inline bool game_in_cinematic(const Pce *p) { return game_state(p) == RON
 static inline bool game_in_intro(const Pce *p) { return game_state(p) == RONDO_OPENING && p->wram[RONDO_SUB] <= 0x01; }
 /* What the frontend's cinematic skipping covers: story scenes and the power-on intro. */
 static inline bool game_in_skippable(const Pce *p) { return game_in_cinematic(p) || game_in_intro(p); }
+
+/* The game's own skip of the logo and the intro. The end of the logo sets $3F84 and the end
+ * of the intro $3F83 (so does the logo's first step if the BIOS backup RAM check at $40E7
+ * returns 0). With $3F83 set, START (a new RUN press) in the intro (sub-state $01) goes to the
+ * title screen; with both set, START in the logo (state $00, past its first step) goes there
+ * too, past the intro (state $02 sub-state $03, the title's script). So after a first full
+ * showing, START skips both; the frontend sets the two flags to have it from the start. Story
+ * scenes have no such skip (the frontend runs them fast). */
+#define RONDO_SEEN_INTRO 0x1F83
+#define RONDO_SEEN_LOGO 0x1F84
+/* the logo and the intro, up to the title screen */
+static inline bool game_in_power_on(const Pce *p) { return game_state(p) == 0x00 || game_in_intro(p); }
+/* where the game looks for that START press */
+static inline bool game_power_on_skippable(const Pce *p)
+{
+    uint8_t sub = p->wram[RONDO_SUB];
+    return (game_state(p) == 0x00 && sub >= 1) || (game_state(p) == RONDO_OPENING && sub == 1);
+}
+static inline void game_allow_power_on_skip(Pce *p) { p->wram[RONDO_SEEN_INTRO] = p->wram[RONDO_SEEN_LOGO] = 1; }
 static inline bool game_playing(const Pce *p) { return game_state(p) == RONDO_PLAYING; }
 
 void game_watch_reset(GameWatch *w, const Pce *p);

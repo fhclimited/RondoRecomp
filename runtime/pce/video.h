@@ -48,46 +48,31 @@ typedef struct Vdc {
     uint32_t fb[PCE_FB_MAX_W * PCE_FB_MAX_H];
     int fb_w, fb_h;
 
-    /* Widescreen (host setting, not machine state): draw this many extra pixels on each
-     * side of a 256-pixel picture, from the background map and the sprites the game
-     * places there. 0 = off, at most VDC_WIDE_MAX. fb_wide is the amount used for the
-     * current frame (latched at its start); the original picture starts at fb[fb_wide]. */
-    int wide;
-    int fb_wide;
-    /* Also host-set, used only while widescreen is drawn: background columns of the
-     * framebuffer outside [wide_x0, wide_x1) are black (beyond the room's walls);
-     * sprites are still drawn there. */
-    int wide_x0, wide_x1;
+    /* Unused, always 0: held widescreen's host settings until 0.13. Kept so the machine
+     * state keeps its size and layout, and save states from 0.12 still load. */
+    int reserved[4];
 } Vdc;
-
-#define VDC_WIDE_MAX 128
 
 void vdc_reset(Vdc *d);
 void vdc_write(Vdc *d, uint16_t off, uint8_t val);
 uint8_t vdc_read(Vdc *d, uint16_t off);
 
-/* Called at the start of each of the 263 lines (before the CPU runs that line). */
+/* Called at the start of each of the 263 lines (before the CPU runs that line): the raster
+ * compare. */
 void vdc_line_start(Vdc *d, int line);
+/* The end of the picture: the sprite table DMA and the vertical blank interrupt. Called
+ * part-way into line display_end, after that line's raster compare has been taken. */
+void vdc_vblank(Vdc *d);
 /* Called after the CPU has run the line: renders it if it is an active display line. */
 void vdc_line_end(Vdc *d, const Vce *vce, int line);
 
-/* Host-side rendering aids for widescreen, kept outside the machine state (save states are
- * unchanged; one picture is drawn at a time per process):
+/* Host-side, kept outside the machine state (save states are unchanged; one picture is
+ * drawn at a time per process):
  * - vdc_row_scroll: the background X scroll (BXR) each displayed row of the last frame was
- *   drawn with; raster splits give bands of rows their own scroll.
- * - vdc_row_bg_blank: rows of the last frame whose background showed nothing (colour 0)
- *   across the original 256 pixels; vdc_row_bg_edge: rows of a widened picture whose
- *   background showed something at its left edge (first 4 pixels).
- * - vdc_set_row_clip: per displayed row, where its background is cut off beyond the
- *   original 256 pixels, as beyond a room's walls (sprites or black there): VDC_CLIP_BOTH
- *   both sides, VDC_CLIP_RIGHT the right side only, 0 neither. NULL for none; the array
- *   (PCE_FB_MAX_H bytes) must stay valid while frames are drawn. */
-enum { VDC_CLIP_BOTH = 1, VDC_CLIP_RIGHT = 2 };
+ *   drawn with; raster splits give bands of rows their own scroll (rondo_headless
+ *   --row-scroll).
+ * - vdc_set_sprite_hide: sprites (a bit per sprite table entry) left out of the picture
+ *   from now on; 0 = none. They still count towards each line's 16 and sprite 0's
+ *   collision, as if drawn: only their pixels are not put in the picture. */
 const uint16_t *vdc_row_scroll(void);
-const uint8_t *vdc_row_bg_blank(void);
-const uint8_t *vdc_row_bg_edge(void);
-void vdc_set_row_clip(const uint8_t *rows);
-/* Sprites (a bit per sprite table entry) left out of the picture from now on; 0 = none.
- * They still count towards each line's 16 and sprite 0's collision, as if drawn: only
- * their pixels are not put in the picture. Host side, like the above. */
 void vdc_set_sprite_hide(uint64_t mask);
